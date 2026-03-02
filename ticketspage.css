@@ -1,0 +1,398 @@
+/*==================================
+  Base and Layout
+==================================*/
+.tickets-wrapper {
+  /* Unified container/layout styles */
+  padding: 30px;
+  background-color: #f8fafc; /* Standardized light background */
+  min-height: 100vh;
+  font-family: "Inter", sans-serif;
+}
+
+.page-title {
+  color: #2b3a67; /* Primary dark color for titles */
+  font-size: 1.8rem;
+  font-weight: 600;
+  margin-bottom: 20px;
+}
+
+/*==================================
+  Search and Input Components
+==================================*/
+.search-container {
+  display: flex;
+  gap: 12px;
+  flex: 2; /* This tells the search area to take up twice as much space as the filters */
+  min-width: 400px; /* Prevents it from getting too squashed */
+}
+
+.search-input {
+  flex: 1;
+  padding: 12px 20px; /* Adjusted padding to match filter height better */
+  border-radius: 8px;
+  border: 1px solid #ccc;
+  font-size: 1rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
+  transition: all 0.2s ease;
+}
+
+.search-btn {
+  background-color: #4b7bec;
+  color: white;
+  padding: 12px 24px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  white-space: nowrap; /* Prevents "Search" text from wrapping */
+  transition: background 0.3s ease;
+}
+/*==================================
+  Table Styles
+==================================*/
+.tickets-table-container {
+  background-color: #ffffff;
+  border-radius: 10px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+}
+
+.tickets-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.tickets-table th,
+.tickets-table td {
+  padding: 14px 16px;
+  text-align: left;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.tickets-table th {
+  background-color: #eef2fa;
+  color: #2b3a67;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Sorting Header Styles */
+.tickets-table th.sortable {
+    display: flex; 
+    align-items: center;
+    justify-content: space-between; 
+    padding-right: 10px; 
+}
+
+.tickets-table th .sort-icon {
+    font-size: 0.8rem;
+    color: #aeb4c7; 
+    margin-left: 8px;
+}
+
+.tickets-table th .sort-icon.active-sort {
+    color: #4b7bec; 
+}
+
+.tickets-table th:hover {
+  background-color: #e2e7f3;
+}
+
+.clickable-row {
+  cursor: pointer;
+  transition: 0.2s;
+}
+
+.clickable-row:hover {
+  background-color: #f8faff;
+}
+
+.expanded-row {
+  background-color: #f3f6fb;
+}
+
+.expanded-details {
+  padding: 20px 16px 15px; /* Increased padding for better spacing */
+}
+
+/* ==================================
+   REVISED DOCUMENT LIST STYLES (Pills)
+   ================================== */
+.document-pills-container {
+    display: flex;
+    flex-wrap: wrap; /* Allows pills to wrap onto the next line */
+    gap: 12px; /* Space between each pill */
+    margin-top: 15px;
+}
+
+.document-pill {
+    display: flex;
+    align-items: center;
+    padding: 8px 15px;
+    border-radius: 20px; /* Pill shape */
+    background-color: #ffffff;
+    border: 1px solid #4b7bec;
+    color: #2b3a67;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: all 0.2s ease;
+}
+
+.document-pill:hover {
+    background-color: #4b7bec; /* Hover effect: inverse colors */
+    color: white;
+    box-shadow: 0 2px 8px rgba(75, 123, 236, 0.3);
+}
+
+.document-pill svg {
+    margin-right: 8px;
+    font-size: 1.1rem;
+}
+
+.document-pill .document-name {
+    font-weight: 600;
+    margin-right: 5px;
+}
+
+.document-pill .document-type {
+    color: #6c757d; /* Lighter color for type */
+}
+
+.document-pill:hover .document-type {
+    color: #ffffff; /* White color on hover */
+}
+
+
+/*==================================
+  Status Colors/Badges
+==================================*/
+
+/* Base Badge Style: applied via getStatusClass */
+.status-badge {
+    padding: 5px 10px;
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 13px;
+    display: inline-block; 
+    line-height: 1; 
+}
+
+/* New/Success (Green) */
+.status-new {
+    background-color: #d4edda; 
+    color: #155724; 
+}
+
+/* In Process/Warning (Orange/Yellow) */
+.status-process {
+    background-color: #fff3cd;
+    color: #856404;
+}
+
+/* Closed/Info (Blue) */
+.status-closed {
+    background-color: #d1ecf1;
+    color: #0c5460;
+}
+
+
+/*==================================
+  PDF Modal (Specific to Tickets)
+==================================*/
+.pdf-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(20, 20, 20, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.pdf-modal-content {
+  background: white;
+  width: 80%;
+  height: 80%;
+  border-radius: 12px;
+  box-shadow: 0 5px 25px rgba(0, 0, 0, 0.3);
+  display: flex;
+  flex-direction: column;
+}
+
+.pdf-modal-header {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 15px;
+  background-color: #f5f7fb;
+  border-bottom: 1px solid #ddd;
+}
+
+.icon-btn {
+  background: #4b7bec;
+  color: white;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.icon-btn:hover {
+  background: #3867d6;
+}
+
+.close-btn {
+  background: #e74c3c;
+  border: none;
+  color: white;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.close-btn:hover {
+  background: #c0392b;
+}
+
+.pdf-viewer {
+  flex: 1;
+  width: 100%;
+  border: none;
+}
+
+/* Container for the expanded area to make it look smaller */
+.compact-expansion-wrapper {
+  padding: 10px 20px;
+  background-color: #fcfcfc;
+  border-bottom: 2px solid #f0f0f0;
+}
+
+/* Button Group side-by-side */
+.action-button-group {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+/* Mini button styles */
+.mini-action-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 0.85rem;
+  border: 1px solid #ddd;
+  background: white;
+  color: #555;
+  border-radius: 20px; /* Rounded look */
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.mini-action-btn:hover {
+  border-color: #007bff;
+  color: #007bff;
+}
+
+/* THE "SELECT EFFECT" */
+.mini-action-btn.selected {
+  background-color: #007bff;
+  border-color: #007bff;
+  color: white;
+  box-shadow: 0 2px 4px rgba(0, 123, 255, 0.3);
+}
+
+/* Smaller document area */
+.mini-document-section {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed #eee;
+}
+
+.document-pill.mini-pill {
+  padding: 4px 10px;
+  font-size: 0.8rem;
+  background: #f1f3f5;
+}
+
+.no-docs-text {
+  font-size: 0.8rem;
+  color: #888;
+  font-style: italic;
+}
+
+
+
+/*==================================
+  Filters Styling
+==================================*/
+
+.dashboard-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 25px;
+  gap: 20px; /* Increased gap for better breathing room */
+  flex-wrap: wrap; /* Ensures it stays usable on smaller screens */
+}
+
+
+.filters-container {
+  display: flex;
+  flex: 1.5; /* Allows filters to grow but keep search dominant */
+  justify-content: flex-end;
+}
+
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.filter-icon {
+  color: #777;
+  margin-right: 5px;
+}
+
+.filter-select {
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+  background-color: white;
+  font-size: 0.9rem;
+  color: #333;
+  cursor: pointer;
+  min-width: 140px;
+  transition: border-color 0.2s;
+}
+
+.filter-select:focus {
+  border-color: #4b7bec;
+  outline: none;
+}
+
+.clear-filters-btn {
+  background: none;
+  border: 1px solid #eb3b5a;
+  color: #eb3b5a;
+  padding: 8px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.clear-filters-btn:hover {
+  background-color: #eb3b5a;
+  color: white;
+}
