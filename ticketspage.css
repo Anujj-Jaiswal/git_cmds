@@ -396,3 +396,12 @@
   background-color: #eb3b5a;
   color: white;
 }
+
+/* Add this to your existing CSS file */
+.sla-expired-row {
+    background-color: #fff1f0 !important; /* Light red background */
+}
+
+.sla-expired-row:hover {
+    background-color: #ffe4e1 !important; /* Slightly darker on hover */
+}
