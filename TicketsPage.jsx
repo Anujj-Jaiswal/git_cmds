@@ -47,7 +47,6 @@ const TicketsPage = () => {
     fetchTickets();
   }, []);
 
-  // Filter effect: runs whenever the tickets list or filter dropdowns change
   useEffect(() => {
     let result = [...tickets];
 
@@ -64,6 +63,14 @@ const TicketsPage = () => {
     setFilteredTickets(result);
   }, [tickets, filters]);
 
+  // --- SLA HELPER FUNCTION ---
+  const isSLAExpired = (createdAt) => {
+    const createdDate = new Date(createdAt);
+    const now = new Date();
+    const diffInHours = (now - createdDate) / (1000 * 60 * 60);
+    return diffInHours > 72;
+  };
+
   const enrichWithMockDrug = (ticket) => {
     const randomIndex = Math.floor(Math.random() * MOCK_DATA.length);
     const randomUserIndex = Math.floor(Math.random() * USERS.length);
@@ -71,7 +78,6 @@ const TicketsPage = () => {
       ...ticket,
       drug_name: ticket.drug_name || MOCK_DATA[randomIndex].drug_name,
       therapeutic_indication: ticket.therapeutic_indication || MOCK_DATA[randomIndex].therapeutic_indication,
-      // Also ensuring API data has one of our constant users for filter consistency
       assigned_user: ticket.assigned_user || USERS[randomUserIndex]
     };
   };
@@ -127,7 +133,6 @@ const TicketsPage = () => {
     setSortConfig({ key, direction });
   };
 
-  // ... (toggleExpand, fetchAndFilterDocs, getFileIcon, getStatusClass, handlePdfPreview remain the same)
   const toggleExpand = (ticketId) => {
     if (expandedTicket === ticketId) {
       setExpandedTicket(null);
@@ -235,6 +240,7 @@ const TicketsPage = () => {
               <th>Description</th>
               <th>Drug Name</th>
               <th>Therapeutic Indication</th>
+              <th>SLA Expired</th>
               <th>Status</th>
               <th>Assigned User</th>
               <th onClick={() => sortBy("created_at")} className="sortable">
@@ -243,67 +249,77 @@ const TicketsPage = () => {
             </tr>
           </thead>
           <tbody>
-            {filteredTickets.map((t) => (
-              <React.Fragment key={t.ticket_id}>
-                <tr onClick={() => toggleExpand(t.ticket_id)} className={`clickable-row ${expandedTicket === t.ticket_id ? "active-row" : ""}`}>
-                  <td>{t.ticket_id}</td>
-                  <td>{t.source}</td>
-                  {role === "Admin" && <td>{t.tenant_name || "-"}</td>}
-                  {role === "Admin" && <td>{t.client_name || "-"}</td>}
-                  <td>{t.project_key || "-"}</td>
-                  <td>{t.project_description}</td>
-                  <td>{t.drug_name}</td>
-                  <td>{t.therapeutic_indication}</td>
-                  <td><span className={getStatusClass(t.status)}>{t.status}</span></td>
-                  <td>{t.assigned_user}</td>
-                  <td>{new Date(t.created_at).toLocaleString()}</td>
-                </tr>
-
-                {expandedTicket === t.ticket_id && (
-                  <tr className="expanded-row">
-                    <td colSpan={role === "Admin" ? 11 : 9}>
-                      <div className="compact-expansion-wrapper">
-                        <div className="action-button-group">
-                          <button 
-                            className={`mini-action-btn ${docCategory === 'associated' ? 'selected' : ''}`}
-                            onClick={(e) => { e.stopPropagation(); fetchAndFilterDocs(t.ticket_id, 'associated'); }}
-                          >
-                            <FaFolderOpen /> Associated Documents
-                          </button>
-                          <button 
-                            className={`mini-action-btn ${docCategory === 'generated' ? 'selected' : ''}`}
-                            onClick={(e) => { e.stopPropagation(); fetchAndFilterDocs(t.ticket_id, 'generated'); }}
-                          >
-                            <FaCogs /> Generated Documents
-                          </button>
-                        </div>
-
-                        {docCategory && (
-                          <div className="mini-document-section">
-                            <div className="document-pills-container">
-                              {documents.length > 0 ? (
-                                documents.map((doc) => (
-                                  <button
-                                    key={doc.document_id}
-                                    onClick={() => handlePdfPreview(doc.path)}
-                                    className="document-pill mini-pill"
-                                  >
-                                    {getFileIcon(doc.file_type)}
-                                    <span className="document-name">{doc.filename}</span>
-                                  </button>
-                                ))
-                              ) : (
-                                <p className="no-docs-text">No files available in this category.</p>
-                              )}
-                            </div>
-                          </div>
-                        )}
-                      </div>
+            {filteredTickets.map((t) => {
+              const expired = isSLAExpired(t.created_at);
+              return (
+                <React.Fragment key={t.ticket_id}>
+                  <tr 
+                    onClick={() => toggleExpand(t.ticket_id)} 
+                    className={`clickable-row ${expandedTicket === t.ticket_id ? "active-row" : ""} ${expired ? "sla-expired-row" : ""}`}
+                  >
+                    <td>{t.ticket_id}</td>
+                    <td>{t.source}</td>
+                    {role === "Admin" && <td>{t.tenant_name || "-"}</td>}
+                    {role === "Admin" && <td>{t.client_name || "-"}</td>}
+                    <td>{t.project_key || "-"}</td>
+                    <td>{t.project_description}</td>
+                    <td>{t.drug_name}</td>
+                    <td>{t.therapeutic_indication}</td>
+                    <td style={{ fontWeight: 'bold', color: expired ? '#d9534f' : 'inherit' }}>
+                        {expired ? "Yes" : "No"}
                     </td>
+                    <td><span className={getStatusClass(t.status)}>{t.status}</span></td>
+                    <td>{t.assigned_user}</td>
+                    <td>{new Date(t.created_at).toLocaleString()}</td>
                   </tr>
-                )}
-              </React.Fragment>
-            ))}
+
+                  {expandedTicket === t.ticket_id && (
+                    <tr className="expanded-row">
+                      {/* colSpan adjusted to 12 for Admin, 10 for others due to new SLA column */}
+                      <td colSpan={role === "Admin" ? 12 : 10}>
+                        <div className="compact-expansion-wrapper">
+                          <div className="action-button-group">
+                            <button 
+                              className={`mini-action-btn ${docCategory === 'associated' ? 'selected' : ''}`}
+                              onClick={(e) => { e.stopPropagation(); fetchAndFilterDocs(t.ticket_id, 'associated'); }}
+                            >
+                              <FaFolderOpen /> Associated Documents
+                            </button>
+                            <button 
+                              className={`mini-action-btn ${docCategory === 'generated' ? 'selected' : ''}`}
+                              onClick={(e) => { e.stopPropagation(); fetchAndFilterDocs(t.ticket_id, 'generated'); }}
+                            >
+                              <FaCogs /> Generated Documents
+                            </button>
+                          </div>
+
+                          {docCategory && (
+                            <div className="mini-document-section">
+                              <div className="document-pills-container">
+                                {documents.length > 0 ? (
+                                  documents.map((doc) => (
+                                    <button
+                                      key={doc.document_id}
+                                      onClick={() => handlePdfPreview(doc.path)}
+                                      className="document-pill mini-pill"
+                                    >
+                                      {getFileIcon(doc.file_type)}
+                                      <span className="document-name">{doc.filename}</span>
+                                    </button>
+                                  ))
+                                ) : (
+                                  <p className="no-docs-text">No files available in this category.</p>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              );
+            })}
           </tbody>
         </table>
       </div>
