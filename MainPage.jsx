@@ -4,7 +4,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from "recha
 import "../css/mainpage.css";
 import { useRole } from "../context/RoleContext";
 
-// --- MOCK DATA FOR RECENT TICKETS & RECORDS CALCULATION ---
+// --- MOCK DATA ---
 const MOCK_TICKETS = [
   { ticket_id: "TKT-20260225-000002", source: "Email", tenant_name: "Fortrea", client_name: "GSK", project_key: "PROJ-GSK-IMMUNO2", project_description: "Oncology immunotherapy study", status: "Closed", assigned_user: "Rohan Mehta", created_at: "2026-02-25T22:12:18" },
   { ticket_id: "TKT-20260224-000003", source: "Email", tenant_name: "Fortrea", client_name: "Merck", project_key: "PROJ-MRK-DIAB3", project_description: "Type 2 diabetes trial", status: "Closed", assigned_user: "Sneha Kapoor", created_at: "2026-02-24T21:05:44" },
@@ -15,32 +15,35 @@ const MOCK_TICKETS = [
   { ticket_id: "TKT-20260219-000008", source: "Email", tenant_name: "Fortrea", client_name: "Merck", project_key: "PROJ-MRK-ONC8", project_description: "Solid tumor therapy study", status: "Closed", assigned_user: "Vikram Singh", created_at: "2026-02-19T16:02:27" },
 ];
 
-// Calculation of record statuses based on the 7 mocks discussed:
-// Approved: 2, Pending: 2, Under-Review: 2, Rejected: 1
-const CHART_DATA = [
-  { name: "Approved", value: 2, color: "#28a745" },
-  { name: "Pending", value: 2, color: "#ffc107" },
-  { name: "Under-Review", value: 2, color: "#17a2b8" },
-  { name: "Rejected", value: 1, color: "#dc3545" },
-];
-
 const MainPage = () => {
   const { role } = useRole();
+  
+  // Initialize stats with Mock values only
   const [stats, setStats] = useState({
-    new_tickets_today: 1,
+    new_tickets_today: 0, 
     total_tickets: MOCK_TICKETS.length,
     pending_records: 2,
     under_review_records: 2,
-    approved_records: 2
+    approved_records: 2,
+    rejected_records: 1 // Added to track for the chart
   });
+
   const [clients, setClients] = useState([]);
   const [projects, setProjects] = useState([]);
   const [tickets, setTickets] = useState(MOCK_TICKETS);
   const [hoverClient, setHoverClient] = useState(null);
   const [hoverProject, setHoverProject] = useState(null);
 
+  // Dynamic Chart Data based on current stats
+  const chartData = [
+    { name: "Approved", value: stats.approved_records, color: "#28a745" },
+    { name: "Pending", value: stats.pending_records, color: "#ffc107" },
+    { name: "Under-Review", value: stats.under_review_records, color: "#17a2b8" },
+    { name: "Rejected", value: stats.rejected_records, color: "#dc3545" },
+  ];
+
   useEffect(() => {
-    // Derived from MOCK_TICKETS
+    // Derived from MOCK_TICKETS for Sidebar/Dropdowns
     const uniqueSponsors = [...new Set(MOCK_TICKETS.map(t => t.client_name))].map((name, index) => ({
       client_id: index,
       name: name,
@@ -59,12 +62,25 @@ const MainPage = () => {
     const fetchData = async () => {
       try {
         const statsRes = await axios.get("http://127.0.0.1:8000/dashboard/stats");
-        // We merge API stats but keep our mock-based structure
-        setStats(prev => ({ ...prev, ...statsRes.data }));
+        const apiStats = statsRes.data;
+
+        // Update stats: Mock + API
+        setStats({
+          new_tickets_today: (apiStats.new_tickets_today || 0) + 1, // Mock has 1 new today logic
+          total_tickets: MOCK_TICKETS.length + (apiStats.total_tickets || 0),
+          pending_records: 2 + (apiStats.pending_records || 0),
+          under_review_records: 2 + (apiStats.under_review_records || 0),
+          approved_records: 2 + (apiStats.approved_records || 0),
+          rejected_records: 1 + (apiStats.rejected_records || 0),
+        });
 
         const ticketsRes = await axios.get("http://127.0.0.1:8000/dashboard/recent-tickets");
         if (ticketsRes.data.recent_tickets?.length > 0) {
-            setTickets([...MOCK_TICKETS, ...ticketsRes.data.recent_tickets]);
+            // Combine and Sort by Date (Descending) to get latest
+            const combined = [...ticketsRes.data.recent_tickets, ...MOCK_TICKETS].sort(
+                (a, b) => new Date(b.created_at) - new Date(a.created_at)
+            );
+            setTickets(combined);
         }
       } catch (err) {
         console.error("Error fetching dashboard data", err);
@@ -94,7 +110,6 @@ const MainPage = () => {
 
   return (
     <div className="mainpage-wrapper">
-      {/* Dashboard Cards Container */}
       <div className="cards-container">
         <div className="dashboard-card card-light">
           <div className="card-title">New Tickets Today</div>
@@ -157,7 +172,6 @@ const MainPage = () => {
         )}
       </div>
 
-      {/* CHART AND TABLE SECTION */}
       <div className="dashboard-visuals">
         <div className="chart-section">
             <h3 className="section-title">Record Status Distribution</h3>
@@ -165,7 +179,7 @@ const MainPage = () => {
                 <ResponsiveContainer>
                     <PieChart>
                         <Pie
-                            data={CHART_DATA}
+                            data={chartData}
                             cx="50%"
                             cy="50%"
                             innerRadius={60}
@@ -173,7 +187,7 @@ const MainPage = () => {
                             paddingAngle={5}
                             dataKey="value"
                         >
-                            {CHART_DATA.map((entry, index) => (
+                            {chartData.map((entry, index) => (
                                 <Cell key={`cell-${index}`} fill={entry.color} />
                             ))}
                         </Pie>
@@ -203,7 +217,8 @@ const MainPage = () => {
               </tr>
             </thead>
             <tbody>
-              {tickets.map((t) => (
+              {/* Only showing the top 5 latest tickets */}
+              {tickets.slice(0, 5).map((t) => (
                 <tr key={t.ticket_id}>
                   <td className="ticket-id">{t.ticket_id}</td>
                   <td>{t.project_description}</td>
