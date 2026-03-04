@@ -3,11 +3,11 @@ import axios from "axios";
 import "../css/ticketspage.css";
 import { useRole } from "../context/RoleContext";
 import { 
-  FaDownload, FaTimes, FaSort, FaSortUp, FaSortDown, 
+  FaDownload, FaTimes, FaSortUp, FaSortDown, 
   FaFilePdf, FaFileArchive, FaEnvelope, FaFolderOpen, FaCogs, FaFileCode, FaFilter 
 } from "react-icons/fa"; 
 
-// --- CONSTANTS FOR FILTERS ---
+// --- CONSTANTS ---
 const SPONSORS = ["Pfizer", "GSK", "Merck", "Novartis", "Novo Nordisk", "Abbvie"];
 const STUDIES = [
   "PROJ-GSK-IMMUNO2", "PROJ-MRK-DIAB3", "PROJ-NVS-CARD4", 
@@ -19,16 +19,14 @@ const USERS = [
   "Karan Malhotra", "Neha Verma", "Vikram Singh", "Anuj Jaiswal", "Rajeshwari M"
 ];
 
-// --- MOCK DATA DEFINITION ---
-// Status locked to "Closed". Dates set relative to March 4, 2026.
+// --- MOCK DATA (March 2026 Context) ---
 const MOCK_DATA = [
-  { ticket_id: "TKT-20260302-000001", source: "Email", tenant_name: "Fortrea", client_name: "GSK", project_key: "PROJ-GSK-IMMUNO2", project_description: "Oncology immunotherapy study", drug_name: "Lipitor", therapeutic_indication: "High cholesterol", status: "Closed", assigned_user: "Rohan Mehta", created_at: "2026-03-02T09:00:00" }, // Due Today (~52h ago)
-  { ticket_id: "TKT-20260301-000002", source: "Email", tenant_name: "Fortrea", client_name: "Merck", project_key: "PROJ-MRK-DIAB3", project_description: "Type 2 diabetes trial", drug_name: "Humira", therapeutic_indication: "Rheumatoid arthritis", status: "Closed", assigned_user: "Sneha Kapoor", created_at: "2026-03-01T15:00:00" }, // Due Today (~70h ago)
+  { ticket_id: "TKT-20260304-000008", source: "Email", tenant_name: "Fortrea", client_name: "Merck", project_key: "PROJ-MRK-ONC8", project_description: "Solid tumor therapy", drug_name: "Entresto", therapeutic_indication: "Chronic heart failure", status: "Closed", assigned_user: "Vikram Singh", created_at: "2026-03-04T08:00:00" }, // On Track
+  { ticket_id: "TKT-20260302-000001", source: "Email", tenant_name: "Fortrea", client_name: "GSK", project_key: "PROJ-GSK-IMMUNO2", project_description: "Oncology immunotherapy study", drug_name: "Lipitor", therapeutic_indication: "High cholesterol", status: "Closed", assigned_user: "Rohan Mehta", created_at: "2026-03-02T09:00:00" }, // Due Today (~50h)
+  { ticket_id: "TKT-20260301-000002", source: "Email", tenant_name: "Fortrea", client_name: "Merck", project_key: "PROJ-MRK-DIAB3", project_description: "Type 2 diabetes trial", drug_name: "Humira", therapeutic_indication: "Rheumatoid arthritis", status: "Closed", assigned_user: "Sneha Kapoor", created_at: "2026-03-01T15:00:00" }, // Due Today (~68h)
   { ticket_id: "TKT-20260223-000004", source: "Email", tenant_name: "Fortrea", client_name: "Novartis", project_key: "PROJ-NVS-CARD4", project_description: "Chronic heart failure study", drug_name: "Keytruda", therapeutic_indication: "Advanced melanoma", status: "Closed", assigned_user: "Arjun Rao", created_at: "2026-02-23T20:47:29" }, // Expired
   { ticket_id: "TKT-20260222-000005", source: "Email", tenant_name: "Fortrea", client_name: "Novo Nordisk", project_key: "PROJ-NN-OBES5", project_description: "Obesity program", drug_name: "Ozempic", therapeutic_indication: "Type 2 diabetes", status: "Closed", assigned_user: "Priya Sharma", created_at: "2026-02-22T19:33:11" },
-  { ticket_id: "TKT-20260221-000006", source: "Email", tenant_name: "Fortrea", client_name: "Abbvie", project_key: "PROJ-ABBV-RA6", project_description: "Rheumatoid arthritis", drug_name: "Eliquis", therapeutic_indication: "Stroke prevention", status: "Closed", assigned_user: "Karan Malhotra", created_at: "2026-02-21T18:21:53" },
-  { ticket_id: "TKT-20260220-000007", source: "Email", tenant_name: "Fortrea", client_name: "GSK", project_key: "PROJ-GSK-RESP7", project_description: "Respiratory vaccine", drug_name: "Revlimid", therapeutic_indication: "Multiple myeloma", status: "Closed", assigned_user: "Neha Verma", created_at: "2026-02-20T17:14:36" },
-  { ticket_id: "TKT-20260304-000008", source: "Email", tenant_name: "Fortrea", client_name: "Merck", project_key: "PROJ-MRK-ONC8", project_description: "Solid tumor therapy", drug_name: "Entresto", therapeutic_indication: "Chronic heart failure", status: "Closed", assigned_user: "Vikram Singh", created_at: "2026-03-04T08:00:00" }, // On Track
+  { ticket_id: "TKT-20260221-000006", source: "Email", tenant_name: "Fortrea", client_name: "Abbvie", project_key: "PROJ-ABBV-RA6", project_description: "Rheumatoid arthritis", drug_name: "Eliquis", therapeutic_indication: "Stroke prevention", status: "Closed", assigned_user: "Karan Malhotra", created_at: "2026-02-21T18:21:53" }
 ];
 
 const TicketsPage = () => {
@@ -42,12 +40,13 @@ const TicketsPage = () => {
   const [docCategory, setDocCategory] = useState(null); 
   const [documents, setDocuments] = useState([]);
   const [pdfPreview, setPdfPreview] = useState(null);
-  const [sortConfig, setSortConfig] = useState({ key: "ticket_id", direction: "asc" });
+  const [sortConfig, setSortConfig] = useState({ key: "created_at", direction: "desc" });
 
   useEffect(() => {
     fetchTickets();
   }, []);
 
+  // Sync filtering - prevents duplication by always deriving from 'tickets' state
   useEffect(() => {
     let result = [...tickets];
     if (filters.sponsor) result = result.filter(t => t.client_name === filters.sponsor);
@@ -64,7 +63,6 @@ const TicketsPage = () => {
   };
 
   const isSLAExpired = (createdAt) => getDiffInHours(createdAt) > 72;
-
   const isDueToday = (createdAt) => {
     const hours = getDiffInHours(createdAt);
     return hours >= 48 && hours <= 72;
@@ -84,7 +82,7 @@ const TicketsPage = () => {
     const randomUserIndex = Math.floor(Math.random() * USERS.length);
     return {
       ...ticket,
-      status: "Closed", // Lock status
+      status: "Closed", // Force status to Closed
       drug_name: ticket.drug_name || MOCK_DATA[randomIndex].drug_name,
       therapeutic_indication: ticket.therapeutic_indication || MOCK_DATA[randomIndex].therapeutic_indication,
       assigned_user: ticket.assigned_user || USERS[randomUserIndex]
@@ -102,7 +100,10 @@ const TicketsPage = () => {
           } catch { return enrichWithMockDrug(t); }
         })
       );
-      setTickets([...MOCK_DATA, ...apiTickets]);
+      // Combine and remove any accidental duplicates based on ticket_id
+      const combined = [...MOCK_DATA, ...apiTickets];
+      const unique = combined.filter((v, i, a) => a.findIndex(t => t.ticket_id === v.ticket_id) === i);
+      setTickets(unique.sort((a,b) => new Date(b.created_at) - new Date(a.created_at)));
     } catch (err) {
       setTickets(MOCK_DATA);
     }
@@ -117,19 +118,12 @@ const TicketsPage = () => {
     } catch (err) { console.error(err); }
   };
 
-  const handleFilterChange = (e) => {
-    const { name, value } = e.target;
-    setFilters(prev => ({ ...prev, [name]: value }));
-  };
-
   const sortBy = (key) => {
     let direction = "asc";
     if (sortConfig.key === key) direction = sortConfig.direction === "asc" ? "desc" : "asc";
     const sorted = [...filteredTickets].sort((a, b) => {
       if (key === 'created_at') return direction === "asc" ? new Date(a[key]) - new Date(b[key]) : new Date(b[key]) - new Date(a[key]);
-      if (a[key] < b[key]) return direction === "asc" ? -1 : 1;
-      if (a[key] > b[key]) return direction === "asc" ? 1 : -1;
-      return 0;
+      return direction === "asc" ? (a[key] < b[key] ? -1 : 1) : (a[key] < b[key] ? 1 : -1);
     });
     setFilteredTickets(sorted);
     setSortConfig({ key, direction });
@@ -162,8 +156,7 @@ const TicketsPage = () => {
 
   const handlePdfPreview = (path) => setPdfPreview(`http://127.0.0.1:8000/${path}`);
 
-  // Styling for wrapped headers and table frame consistency
-  const headerStyle = { whiteSpace: 'normal', wordWrap: 'break-word', lineHeight: '1.1', padding: '6px 4px', verticalAlign: 'middle' };
+  const headerStyle = { whiteSpace: 'normal', wordWrap: 'break-word', lineHeight: '1.1', padding: '6px 4px' };
 
   return (
     <div className="tickets-wrapper">
@@ -171,22 +164,22 @@ const TicketsPage = () => {
 
       <div className="dashboard-controls">
         <div className="search-container">
-          <input type="text" placeholder="Search Ticket ID, Study..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="search-input" />
+          <input type="text" placeholder="Search..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="search-input" />
           <button onClick={handleSearch} className="search-btn">Search</button>
         </div>
 
         <div className="filters-container">
           <div className="filter-group">
             <FaFilter className="filter-icon" />
-            <select name="sponsor" value={filters.sponsor} onChange={handleFilterChange} className="filter-select">
+            <select name="sponsor" value={filters.sponsor} onChange={(e) => setFilters({...filters, sponsor: e.target.value})} className="filter-select">
               <option value="">All Sponsors</option>
               {SPONSORS.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
-            <select name="study" value={filters.study} onChange={handleFilterChange} className="filter-select">
+            <select name="study" value={filters.study} onChange={(e) => setFilters({...filters, study: e.target.value})} className="filter-select">
               <option value="">All Studies</option>
               {STUDIES.map(st => <option key={st} value={st}>{st}</option>)}
             </select>
-            <select name="user" value={filters.user} onChange={handleFilterChange} className="filter-select">
+            <select name="user" value={filters.user} onChange={(e) => setFilters({...filters, user: e.target.value})} className="filter-select">
               <option value="">All Users</option>
               {USERS.map(u => <option key={u} value={u}>{u}</option>)}
             </select>
@@ -198,14 +191,11 @@ const TicketsPage = () => {
       </div>
 
       <div className="tickets-table-container">
-        <table className="tickets-table" style={{ fontSize: '0.82rem', width: '100%', tableLayout: 'auto' }}>
+        <table className="tickets-table" style={{ fontSize: '0.82rem', width: '100%' }}>
           <thead>
             <tr>
-              <th onClick={() => sortBy("ticket_id")} className="sortable" style={headerStyle}>
-                Ticket ID {sortConfig.key === "ticket_id" && (sortConfig.direction === "asc" ? <FaSortUp /> : <FaSortDown />)}
-              </th>
+              <th onClick={() => sortBy("ticket_id")} style={headerStyle}>Ticket ID {sortConfig.key === "ticket_id" && (sortConfig.direction === "asc" ? <FaSortUp/> : <FaSortDown/>)}</th>
               <th style={headerStyle}>Source</th>
-              {role === "Admin" && <th style={headerStyle}>Tenant</th>}
               {role === "Admin" && <th style={headerStyle}>Sponsor</th>}
               <th style={headerStyle}>Study ID</th>
               <th style={headerStyle}>Description</th>
@@ -214,9 +204,7 @@ const TicketsPage = () => {
               <th style={headerStyle}>SLA Status</th>
               <th style={headerStyle}>Status</th>
               <th style={headerStyle}>User</th>
-              <th onClick={() => sortBy("created_at")} className="sortable" style={headerStyle}>
-                Creation Timeline {sortConfig.key === "created_at" && (sortConfig.direction === "asc" ? <FaSortUp /> : <FaSortDown />)}
-              </th>
+              <th onClick={() => sortBy("created_at")} style={headerStyle}>Creation Timeline {sortConfig.key === "created_at" && (sortConfig.direction === "asc" ? <FaSortUp/> : <FaSortDown/>)}</th>
             </tr>
           </thead>
           <tbody>
@@ -234,15 +222,14 @@ const TicketsPage = () => {
                   >
                     <td>{t.ticket_id}</td>
                     <td>{t.source}</td>
-                    {role === "Admin" && <td>{t.tenant_name || "-"}</td>}
                     {role === "Admin" && <td>{t.client_name || "-"}</td>}
                     <td>{t.project_key || "-"}</td>
                     <td style={{ maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.project_description}</td>
                     <td>{t.drug_name}</td>
                     <td style={{ maxWidth: '120px' }}>{t.therapeutic_indication}</td>
                     <td style={{ fontWeight: 'bold' }}>
-                        {expired ? <span style={{color: '#d9534f'}}>Expired</span> : 
-                         dueToday ? <span style={{color: '#856404'}}>Due Today</span> : "On Track"}
+                      {expired ? <span style={{color: '#d9534f'}}>Expired</span> : 
+                       dueToday ? <span style={{color: '#856404'}}>Due Today</span> : "On Track"}
                     </td>
                     <td><span className="status-badge status-closed">Closed</span></td>
                     <td>{t.assigned_user}</td>
@@ -254,7 +241,7 @@ const TicketsPage = () => {
 
                   {expandedTicket === t.ticket_id && (
                     <tr className="expanded-row">
-                      <td colSpan={role === "Admin" ? 12 : 10}>
+                      <td colSpan={role === "Admin" ? 11 : 10}>
                         <div className="compact-expansion-wrapper">
                           <div className="action-button-group">
                             <button className={`mini-action-btn ${docCategory === 'associated' ? 'selected' : ''}`} onClick={(e) => { e.stopPropagation(); fetchAndFilterDocs(t.ticket_id, 'associated'); }}>
@@ -290,7 +277,7 @@ const TicketsPage = () => {
         <div className="pdf-modal">
           <div className="pdf-modal-content">
             <div className="pdf-modal-header">
-              <button className="icon-btn"><FaDownload /> Download</button>
+              <button className="icon-btn" onClick={() => window.open(pdfPreview)}><FaDownload /> Download</button>
               <button className="close-btn" onClick={() => setPdfPreview(null)}><FaTimes /></button>
             </div>
             <iframe src={pdfPreview} title="PDF Preview" className="pdf-viewer" />
@@ -302,5 +289,4 @@ const TicketsPage = () => {
 };
 
 export default TicketsPage;
-                                                                                                      
-  
+        
