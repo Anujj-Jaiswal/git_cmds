@@ -1,0 +1,276 @@
+import React, { useState, useEffect } from "react";
+import axios from "axios";
+import "../css/export.css";
+import { useRole } from "../context/RoleContext";
+import { 
+  FaFileExport, FaEye, FaTimes, FaSort, FaSortUp, 
+  FaSortDown, FaCheckCircle, FaClock, FaExchangeAlt, FaServer 
+} from "react-icons/fa"; 
+
+const ExportPage = () => {
+  const { role } = useRole();
+  const [exportData, setExportData] = useState([]);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [sortConfig, setSortConfig] = useState({ key: "", direction: "asc" });
+  const [pdfPreviewPath, setPdfPreviewPath] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  // 🔹 Handshake & System Sync States
+  const [showHandshake, setShowHandshake] = useState(false);
+  const [activeExport, setActiveExport] = useState(null);
+  const [selectedSystem, setSelectedSystem] = useState("");
+  const [isSyncing, setIsSyncing] = useState(false);
+  // Stores { record_id: { token, system, time, caseId, caseStatus } }
+  const [passedRecordsMap, setPassedRecordsMap] = useState({}); 
+
+  useEffect(() => {
+    fetchApprovedExports();
+  }, []);
+
+  const fetchApprovedExports = async () => {
+    try {
+      setLoading(true);
+      const ticketsRes = await axios.get("http://127.0.0.1:8000/records/tickets");
+      const ticketIds = ticketsRes.data.map(t => t.ticket_id);
+      
+      const exportPromises = ticketIds.map(async (ticketId) => {
+        try {
+          const res = await axios.get(`http://127.0.0.1:8000/export/ticket/${ticketId}`);
+          return res.data.filter((item) => item.record_status === "Approved");
+        } catch (error) { return []; }
+      });
+
+      const results = await Promise.all(exportPromises);
+      setExportData(results.flat());
+    } catch (err) {
+      console.error("Error fetching exports", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleInitiatePass = (record) => {
+    setActiveExport(record);
+    setShowHandshake(true);
+  };
+
+  const handleFinalizeSync = async () => {
+    if (!selectedSystem) return alert("Please select a target outbounding system.");
+
+    setIsSyncing(true);
+    try {
+      const res = await axios.post(
+        `http://127.0.0.1:8000/export/generate_files?record_id=${activeExport.record_id}&ticket_id=${activeExport.ticket_id}`
+      );
+
+      setTimeout(() => {
+        if (res.data.success) {
+          const systemPrefix = selectedSystem.split(" ").map(n => n[0]).join("");
+          const mockToken = `${systemPrefix}-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`;
+          
+          // Generate Incremental Case ID based on current passed records count
+          const currentPassedCount = Object.keys(passedRecordsMap).length;
+          const incrementalCaseId = `ARG-CAS-${202400 + currentPassedCount + 1}`;
+
+          setPassedRecordsMap(prev => ({
+            ...prev,
+            [activeExport.record_id]: {
+              token: mockToken,
+              system: selectedSystem,
+              timestamp: new Date().toLocaleString(),
+              caseId: incrementalCaseId,
+              caseStatus: "Successful"
+            }
+          }));
+
+          setIsSyncing(false);
+          setShowHandshake(false);
+          setSelectedSystem("");
+          setActiveExport(null);
+        }
+      }, 1500); 
+    } catch (err) {
+      console.error("Handshake Failed", err);
+      setIsSyncing(false);
+      alert("System Handshake Failed: Connection Timeout.");
+    }
+  };
+
+  const handleViewXml = async (ticket_id) => {
+    try {
+      const res = await axios.get(`http://127.0.0.1:8000/tickets/ticket/${ticket_id}`);
+      const xmlPdfDoc = res.data.find((d) => d.file_type === "XML_PDF");
+      if (xmlPdfDoc) {
+        setPdfPreviewPath(`http://127.0.0.1:8000/${xmlPdfDoc.path}`);
+      } else {
+        alert("No XML_PDF file found.");
+      }
+    } catch (err) { console.error("Error fetching XML PDF", err); }
+  };
+
+  const queuedRecords = exportData.filter(item => !passedRecordsMap[item.record_id]);
+  const passedRecords = exportData.filter(item => passedRecordsMap[item.record_id]);
+
+  const renderTableHead = (isPassedSection) => (
+    <thead>
+      <tr>
+        <th>Ticket ID</th>
+        <th>Record ID</th>
+        <th>Patient ID</th>
+        {role === "Admin" && <th>Tenant</th>}
+        <th>Study ID</th>
+        <th>Study Description</th>
+        {isPassedSection ? (
+          <>
+            <th>Target System</th>
+            <th>Case ID</th>
+            <th>Case Status</th>
+            <th>System ACK Token</th>
+          </>
+        ) : (
+          <th>Assigned User</th>
+        )}
+        <th>Status</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+  );
+
+  return (
+    <div className="export-wrapper">
+      <h2 className="page-title">Safety Export & Outbound Dashboard</h2>
+
+      {loading && <p className="loading-text">Synchronizing records...</p>}
+
+      {!loading && (
+        <>
+          {/* SECTION 1: QUEUED */}
+          <div className="export-table-container">
+            <h3 className="section-title queued-title"><FaClock /> Queued for Outbound Delivery</h3>
+            <table className="export-table">
+              {renderTableHead(false)}
+              <tbody>
+                {queuedRecords.map((exp) => (
+                  <tr key={exp.record_id}>
+                    <td>{exp.ticket_id}</td>
+                    <td>{exp.record_id}</td>
+                    <td>{exp.patient_id}</td>
+                    {role === "Admin" && <td>{exp.tenant_name}</td>}
+                    <td>{exp.project_key}</td>
+                    <td>{exp.project_description}</td>
+                    <td>{exp.user_assigned}</td>
+                    <td><span className="status-badge status-approved">{exp.record_status}</span></td>
+                    <td>
+                      <button className="action-btn export-xml-btn" onClick={() => handleInitiatePass(exp)}>
+                        <FaExchangeAlt /> Pass Record
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <hr className="dashboard-divider" />
+
+          {/* SECTION 2: PASSED (Revised with Case ID and Case Status) */}
+          <div className="export-table-container">
+            <h3 className="section-title passed-title"><FaCheckCircle /> Successfully Outbounded (Synced with Argus)</h3>
+            <table className="export-table">
+              {renderTableHead(true)}
+              <tbody>
+                {passedRecords.map((exp) => (
+                  <tr key={exp.record_id} className="row-passed">
+                    <td>{exp.ticket_id}</td>
+                    <td>{exp.record_id}</td>
+                    <td>{exp.patient_id}</td>
+                    {role === "Admin" && <td>{exp.tenant_name}</td>}
+                    <td>{exp.project_key}</td>
+                    <td>{exp.project_description}</td>
+                    <td><span className="system-tag">{passedRecordsMap[exp.record_id].system}</span></td>
+                    {/* New Incremental Case ID Column */}
+                    <td><b style={{color: "#2c3e50"}}>{passedRecordsMap[exp.record_id].caseId}</b></td>
+                    {/* New Case Status Column */}
+                    <td>
+                      <span className="status-badge" style={{backgroundColor: "#d4edda", color: "#155724", border: "1px solid #c3e6cb"}}>
+                        {passedRecordsMap[exp.record_id].caseStatus}
+                      </span>
+                    </td>
+                    <td><code className="token-code">{passedRecordsMap[exp.record_id].token}</code></td>
+                    <td><span className="status-badge status-synced">Synced</span></td>
+                    <td>
+                      <button className="action-btn view-xml-btn" onClick={() => handleViewXml(exp.ticket_id)}>
+                        <FaEye /> View
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {/* HANDSHAKE MODAL */}
+      {showHandshake && (
+        <div className="modal-overlay">
+          <div className="handshake-modal">
+            <div className="modal-header">
+              <h3><FaServer /> External System Handshake</h3>
+              <FaTimes className="close-icon" onClick={() => setShowHandshake(false)} />
+            </div>
+            <div className="modal-body">
+              <p>Initialize secure sync for <strong>Ticket: {activeExport?.ticket_id}</strong></p>
+              
+              <div className="form-field">
+                <label>Select Outbounding Safety System:</label>
+                <select 
+                  value={selectedSystem} 
+                  onChange={(e) => setSelectedSystem(e.target.value)}
+                  disabled={isSyncing}
+                >
+                  <option value="">-- Choose System --</option>
+                  <option value="Oracle Argus Safety">Oracle Argus Safety</option>
+                  <option value="ArisGlobal LifeSphere Safety">ArisGlobal LifeSphere Safety</option>
+                  <option value="Veeva Vault Safety">Veeva Vault Safety</option>
+                </select>
+              </div>
+
+              <div className="form-field">
+                <label>Protocol / Standard:</label>
+                <input type="text" value="AS2 / E2B R3 (XML)" disabled />
+              </div>
+
+              {isSyncing && (
+                <div className="sync-loader">
+                  <div className="spinner"></div>
+                  <p>Establishing handshake and fetching token...</p>
+                </div>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button className="cancel-btn" onClick={() => setShowHandshake(false)} disabled={isSyncing}>Cancel</button>
+              <button className="confirm-sync-btn" onClick={handleFinalizeSync} disabled={isSyncing}>
+                {isSyncing ? "Syncing..." : "Confirm & Send"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PDF Preview Modal */}
+      {pdfPreviewPath && (
+        <div className="pdf-modal">
+          <div className="pdf-modal-content">
+            <div className="pdf-modal-header">
+              <button className="close-btn" onClick={() => setPdfPreviewPath(null)}><FaTimes/> Close</button>
+            </div>
+            <iframe src={pdfPreviewPath} className="pdf-viewer" title="XML PDF Preview"></iframe>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default ExportPage;
