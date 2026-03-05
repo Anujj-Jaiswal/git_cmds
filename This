@@ -1,0 +1,102 @@
+import os
+import requests
+from mail import graph_client
+
+REVIEWER_EMAIL = "anujj1@hexaware.com"
+
+def send_ticket_notification(ticket_id, subject, sender, receiver, user_id):
+
+    token = graph_client.get_fresh_token()
+
+    email_body = f"""
+    <html>
+    <body>
+        <p>Hello,</p>
+
+        <p>A new ticket has been successfully processed by the system and is now available for review.</p>
+
+        <table border="1" cellpadding="6" cellspacing="0" style="border-collapse: collapse;">
+            <tr>
+                <th>Ticket ID</th>
+                <th>Email Subject</th>
+                <th>Sender</th>
+                <th>Receiver</th>
+                <th>Assigned Reviewer</th>
+                <th>Status</th>
+            </tr>
+            <tr>
+                <td>{ticket_id}</td>
+                <td>{subject}</td>
+                <td>{sender}</td>
+                <td>{receiver}</td>
+                <td>{user_id}</td>
+                <td>Closed</td>
+            </tr>
+        </table>
+
+        <p>Please log into the system and review the extracted records.</p>
+
+        <p>Regards<br>
+        PV Automation System</p>
+
+    </body>
+    </html>
+    """
+
+    url = f"https://graph.microsoft.com/v1.0/users/{os.getenv('DELEGATED_USER_EMAIL')}/sendMail"
+
+    payload = {
+        "message": {
+            "subject": f"Ticket Raised - {ticket_id}",
+            "body": {
+                "contentType": "HTML",
+                "content": email_body
+            },
+            "toRecipients": [
+                {
+                    "emailAddress": {
+                        "address": REVIEWER_EMAIL
+                    }
+                }
+            ]
+        }
+    }
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    }
+
+    requests.post(url, headers=headers, json=payload)
+
+
+
+from win10toast import ToastNotifier
+
+def show_ticket_popup(ticket_id):
+
+    toaster = ToastNotifier()
+
+    toaster.show_toast(
+        "PV Automation",
+        f"Ticket {ticket_id} successfully raised and processed.",
+        duration=5,
+        threaded=True
+    )
+
+
+
+from notifications.email_notifier import send_ticket_notification
+from notifications.desktop_alert import show_ticket_popup
+
+
+# Send email notification
+send_ticket_notification(ticket_id, subject, sender, receiver, user_id)
+
+# Desktop popup
+show_ticket_popup(ticket_id)
+
+
+
+
+
