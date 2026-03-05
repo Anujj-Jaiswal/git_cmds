@@ -1,0 +1,161 @@
+import time
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+from db import crud
+from mail import graph_client
+from files import eml_handler, pdf_converter
+from logs.audit_logger import log
+from files import document_processor
+
+load_dotenv()
+
+# Ensure this path is correct for your environment
+BASE_PATH = r"C:\Users\2000147565\Fortrea_Demo\processing_scripts\store\TICKETS"
+
+def main():
+    # Attempt to acquire token immediately to trigger Device Flow if needed
+    try:
+        graph_client.get_fresh_token()
+        print("Initial token check passed. Application active.")
+    except Exception as e:
+        print(f"FATAL ERROR during initial token acquisition: {e}")
+        return # Exit if authentication fails
+
+    # The high-level diagram illustrating the ticket processing steps:
+    # Fetch -> Process -> Convert -> LLM -> Close Ticket
+
+    while True:  # keep checking for new emails
+        emails = graph_client.fetch_unread_emails()
+        
+        if not emails:
+            print("No mail found. Recheck in 10 seconds...")
+            # Added a cleaner wait loop
+            for i in range(10, 0, -1):
+                print(f"Rechecking in {i} sec", end="\r")
+                time.sleep(1)
+            continue
+        
+        for mail in emails:
+            subject = mail.get("subject", "No Subject")
+            sender = mail.get("from", {}).get("emailAddress", {}).get("address", "")
+            # Using the delegated user's email for the receiver context, 
+            # though SHARED_MAILBOX might still be used for tracking in your system.
+            receiver = os.getenv("DELEGATED_USER_EMAIL", "unknown_mailbox@default.com") 
+            internet_msg_id = mail.get("id")
+            print(f"\nFound mail\nProcessing mail -w- {subject}")
+            
+            # --- TICKET METADATA (Kept consistent) ---
+            tenant_id = "TNT001"
+            project_id = "PRJ001"
+            client_id = "CLI001"
+
+            # --- 1. MESSAGE AND TICKET CREATION ---
+            
+            # Insert message 
+            message_id = crud.insert_message(
+                tenant_id, sender, receiver, subject, internet_msg_id, ""
+            )
+
+            # Assign user
+            user_id = crud.get_active_safety_reviewer(tenant_id)
+            
+            # Insert ticket
+            ticket_id = crud.insert_ticket(message_id, tenant_id, user_id, project_id)
+            log("Ticket", "Success", f"Ticket_id Raised (status: New) , User assigned {user_id}")
+
+            # --- AUDIT LOGS (ADDED) ---
+            crud.log_field_audit_event(ticket_id, "TICKET_CREATED", "SYSTEM", f"New ticket created for email '{subject}'")
+            crud.log_field_audit_event(ticket_id, "USER_ASSIGNED", "SYSTEM", f"User '{user_id}' assigned to ticket")
+
+
+            # --- 2. FILE MANAGEMENT AND EML DOWNLOAD ---
+            
+            # Create ticket directory
+            ticket_dir = os.path.join(BASE_PATH, ticket_id)
+            os.makedirs(os.path.join(ticket_dir, "attachments"), exist_ok=True)
+
+            # Download EML
+            eml_path = os.path.join(ticket_dir, "raw_email.eml")
+            # This uses the new graph_client with the cached delegated token
+            graph_client.download_eml(internet_msg_id, eml_path)
+            log("EML Download", "Success", f"Archived Email Message (.eml) @ {eml_path}")
+            crud.update_message_eml_path(message_id, eml_path) # Update path in DB
+
+            # Extract attachments and body
+            body_text, attachments = eml_handler.extract_attachments(eml_path, ticket_dir)
+
+            # --- 3. CONVERSION TO PDF ---
+            
+            # Email body to PDF
+            email_pdf_path = os.path.join(ticket_dir, "attachments", "email_body.pdf")
+            pdf_converter.save_email_body_pdf(body_text, email_pdf_path)
+            crud.insert_document(
+                tenant_id, ticket_id, message_id,
+                "email_body.pdf", email_pdf_path, "Email Body"
+            )
+
+            # Attachments to PDF
+            pdf_files = [email_pdf_path]
+            for att_path in attachments:
+                ext = os.path.splitext(att_path)[1].lower()
+                pdf_name = f"{Path(att_path).stem}.pdf"
+                pdf_path = os.path.join(ticket_dir, "attachments", pdf_name)
+
+                if ext == ".txt":
+                    pdf_converter.txt_to_pdf(att_path, pdf_path)
+                elif ext in [".doc", ".docx"]:
+                    pdf_converter.docx_to_pdf(att_path, pdf_path)
+                elif ext == ".pdf":
+                    # If it's already a PDF, move it to the standardized path if necessary
+                    if att_path != pdf_path:
+                        os.replace(att_path, pdf_path)
+                else:
+                    continue  # Skip unsupported file types
+
+                pdf_files.append(pdf_path)
+                crud.insert_document(
+                    tenant_id, ticket_id, message_id,
+                    pdf_name, pdf_path, "Attachment"
+                )
+            
+            # Consolidated PDF
+            consolidated_path = os.path.join(ticket_dir, "attachments", "consolidated.pdf")
+            pdf_converter.generate_consolidated_pdf(pdf_files, consolidated_path)
+            crud.insert_document(
+                tenant_id, ticket_id, message_id,
+                "consolidated.pdf", consolidated_path, "Consolidated"
+            )
+            log("Attachments", "Success", "Attachments Extracted & Parsed")
+
+            # --- 4. LLM PROCESSING & REVIEW QUEUE (ADDED) ---
+
+            # Update status → Under Process (ADDED)
+            crud.update_ticket_status(ticket_id, "Under Process")
+
+            # Run LLM document processing (ADDED)
+            output_json_path, patient_records = document_processor.process_ticket_documents(ticket_id, ticket_dir)
+            log("LLM Processing", "Success", f"Document fields extracted and saved @ {output_json_path}")
+
+            # Audit log events (ADDED)
+            crud.log_field_audit_event(ticket_id, "AI_EXTRACTION_COMPLETED", "SYSTEM", f"AI extraction completed for ticket {ticket_id}")
+            for patient_id, record_id in patient_records.items():
+                crud.log_field_audit_event(ticket_id, "RECORD_CREATED", "SYSTEM", f"Record created for patient {patient_id}")
+
+            # ADDED LOG FOR HITL QUEUE (ADDED)
+            crud.log_field_audit_event(ticket_id, "HITL_QUEUED", "SYSTEM", "Records automatically queued for Human-In-The-Loop review.")
+            log("Review Queue", "Success", "Records queued for human review.")
+            
+            # --- 5. FINAL STATUS & CLEANUP (ADDED) ---
+            
+            # Close ticket (ADDED)
+            crud.update_ticket_status(ticket_id, "Closed")
+            log("Ticket", "Success", f"Ticket {ticket_id} marked as 'Closed'")
+
+            # Mark email as read/delete in Graph API mailbox
+            # This uses the new graph_client with the cached delegated token
+            graph_client.mark_email_as_read(internet_msg_id)
+            log("Mail Status", "Success", f"Mail {internet_msg_id} marked as read/processed in Graph Mailbox")
+
+if __name__ == "__main__":
+    main()
