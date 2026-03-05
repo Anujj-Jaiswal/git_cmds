@@ -19,15 +19,23 @@ const USERS = [
   "Karan Malhotra", "Neha Verma", "Vikram Singh", "Anuj Jaiswal", "Rajeshwari M"
 ];
 
-// --- MOCK DATA DEFINITION ---
+// Helper to generate dynamic dates for the specific "Due Today" users
+const getDynamicDate = (hoursAgo) => {
+    const d = new Date();
+    d.setHours(d.getHours() - hoursAgo);
+    return d.toISOString();
+};
+
+// --- REVISED MOCK DATA ---
+// Rohan Mehta and Arjun Rao are hardcoded to be ~50h and ~60h old respectively to stay "Due Today"
 const MOCK_DATA = [
-  { ticket_id: "TKT-20260225-000002", source: "Email", tenant_name: "Fortrea", client_name: "GSK", project_key: "PROJ-GSK-IMMUNO2", project_description: "Oncology immunotherapy study", drug_name: "Lipitor (Atorvastatin)", therapeutic_indication: "High cholesterol management", status: "Closed", assigned_user: "Rohan Mehta", created_at: "2026-02-25T22:12:18" },
-  { ticket_id: "TKT-20260224-000003", source: "Email", tenant_name: "Fortrea", client_name: "Merck", project_key: "PROJ-MRK-DIAB3", project_description: "Type 2 diabetes trial", drug_name: "Humira (Adalimumab)", therapeutic_indication: "Rheumatoid arthritis treatment", status: "Closed", assigned_user: "Sneha Kapoor", created_at: "2026-02-24T21:05:44" },
-  { ticket_id: "TKT-20260223-000004", source: "Email", tenant_name: "Fortrea", client_name: "Novartis", project_key: "PROJ-NVS-CARD4", project_description: "Chronic heart failure study", drug_name: "Keytruda (Pembrolizumab)", therapeutic_indication: "Advanced melanoma therapy", status: "Closed", assigned_user: "Arjun Rao", created_at: "2026-02-23T20:47:29" },
-  { ticket_id: "TKT-20260222-000005", source: "Email", tenant_name: "Fortrea", client_name: "Novo Nordisk", project_key: "PROJ-NN-OBES5", project_description: "Obesity management program", drug_name: "Ozempic (Semaglutide)", therapeutic_indication: "Type 2 diabetes control", status: "Closed", assigned_user: "Priya Sharma", created_at: "2026-02-22T19:33:11" },
-  { ticket_id: "TKT-20260221-000006", source: "Email", tenant_name: "Fortrea", client_name: "Abbvie", project_key: "PROJ-ABBV-RA6", project_description: "Rheumatoid arthritis trial", drug_name: "Eliquis (Apixaban)", therapeutic_indication: "Stroke prevention in atrial fibrillation", status: "Closed", assigned_user: "Karan Malhotra", created_at: "2026-02-21T18:21:53" },
-  { ticket_id: "TKT-20260220-000007", source: "Email", tenant_name: "Fortrea", client_name: "GSK", project_key: "PROJ-GSK-RESP7", project_description: "Respiratory vaccine development", drug_name: "Revlimid (Lenalidomide)", therapeutic_indication: "Multiple myeloma treatment", status: "Closed", assigned_user: "Neha Verma", created_at: "2026-02-20T17:14:36" },
-  { ticket_id: "TKT-20260219-000008", source: "Email", tenant_name: "Fortrea", client_name: "Merck", project_key: "PROJ-MRK-ONC8", project_description: "Solid tumor therapy study", drug_name: "Entresto (Sacubitril/Valsartan)", therapeutic_indication: "Chronic heart failure management", status: "Closed", assigned_user: "Vikram Singh", created_at: "2026-02-19T16:02:27" },
+  { ticket_id: "TKT-20260302-000001", source: "Email", tenant_name: "Fortrea", client_name: "GSK", project_key: "PROJ-GSK-IMMUNO2", project_description: "Oncology immunotherapy study", drug_name: "Lipitor", therapeutic_indication: "High cholesterol", status: "Closed", assigned_user: "Rohan Mehta", created_at: getDynamicDate(50) }, 
+  { ticket_id: "TKT-20260301-000002", source: "Email", tenant_name: "Fortrea", client_name: "Merck", project_key: "PROJ-MRK-DIAB3", project_description: "Type 2 diabetes trial", drug_name: "Humira", therapeutic_indication: "Rheumatoid arthritis", status: "Closed", assigned_user: "Sneha Kapoor", created_at: "2026-02-01T15:00:00" }, // Expired
+  { ticket_id: "TKT-20260223-000004", source: "Email", tenant_name: "Fortrea", client_name: "Novartis", project_key: "PROJ-NVS-CARD4", project_description: "Chronic heart failure study", drug_name: "Keytruda", therapeutic_indication: "Advanced melanoma", status: "Closed", assigned_user: "Arjun Rao", created_at: getDynamicDate(60) }, 
+  { ticket_id: "TKT-20260222-000005", source: "Email", tenant_name: "Fortrea", client_name: "Novo Nordisk", project_key: "PROJ-NN-OBES5", project_description: "Obesity program", drug_name: "Ozempic", therapeutic_indication: "Type 2 diabetes", status: "Closed", assigned_user: "Priya Sharma", created_at: "2026-02-22T19:33:11" }, // Expired
+  { ticket_id: "TKT-20260221-000006", source: "Email", tenant_name: "Fortrea", client_name: "Abbvie", project_key: "PROJ-ABBV-RA6", project_description: "Rheumatoid arthritis trial", drug_name: "Eliquis", therapeutic_indication: "Stroke prevention", status: "Closed", assigned_user: "Karan Malhotra", created_at: "2026-02-21T18:21:53" }, // Expired
+  { ticket_id: "TKT-20260220-000007", source: "Email", tenant_name: "Fortrea", client_name: "GSK", project_key: "PROJ-GSK-RESP7", project_description: "Respiratory vaccine", drug_name: "Revlimid", therapeutic_indication: "Multiple myeloma", status: "Closed", assigned_user: "Neha Verma", created_at: "2026-02-20T17:14:36" }, // Expired
+  { ticket_id: "TKT-20260304-000008", source: "Email", tenant_name: "Fortrea", client_name: "Merck", project_key: "PROJ-MRK-ONC8", project_description: "Solid tumor therapy", drug_name: "Entresto", therapeutic_indication: "Chronic heart failure", status: "Closed", assigned_user: "Vikram Singh", created_at: "2026-02-19T16:02:27" }, // Expired
 ];
 
 const TicketsPage = () => {
@@ -49,26 +57,19 @@ const TicketsPage = () => {
 
   useEffect(() => {
     let result = [...tickets];
-
-    if (filters.sponsor) {
-      result = result.filter(t => t.client_name === filters.sponsor);
-    }
-    if (filters.study) {
-      result = result.filter(t => t.project_key === filters.study);
-    }
-    if (filters.user) {
-      result = result.filter(t => t.assigned_user === filters.user);
-    }
-
+    if (filters.sponsor) result = result.filter(t => t.client_name === filters.sponsor);
+    if (filters.study) result = result.filter(t => t.project_key === filters.study);
+    if (filters.user) result = result.filter(t => t.assigned_user === filters.user);
     setFilteredTickets(result);
   }, [tickets, filters]);
 
-  // --- SLA HELPER FUNCTION ---
-  const isSLAExpired = (createdAt) => {
-    const createdDate = new Date(createdAt);
-    const now = new Date();
-    const diffInHours = (now - createdDate) / (1000 * 60 * 60);
-    return diffInHours > 72;
+  // --- REVISED SLA STATUS LOGIC ---
+  const getSLAStatus = (createdAt) => {
+    const diffInHours = (new Date() - new Date(createdAt)) / (1000 * 60 * 60);
+    
+    if (diffInHours > 72) return { label: "Expired", color: "#f8d7da", textColor: "#721c24" };
+    if (diffInHours >= 48) return { label: "Due Today", color: "#fff3cd", textColor: "#856404" };
+    return { label: "On Track", color: "transparent", textColor: "inherit" };
   };
 
   const enrichWithMockDrug = (ticket) => {
@@ -188,7 +189,6 @@ const TicketsPage = () => {
     <div className="tickets-wrapper">
       <h2 className="page-title">Tickets Dashboard</h2>
 
-      {/* SEARCH AND FILTER BAR */}
       <div className="dashboard-controls">
         <div className="search-container">
           <input
@@ -208,17 +208,14 @@ const TicketsPage = () => {
               <option value="">All Sponsors</option>
               {SPONSORS.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
-
             <select name="study" value={filters.study} onChange={handleFilterChange} className="filter-select">
               <option value="">All Studies</option>
               {STUDIES.map(st => <option key={st} value={st}>{st}</option>)}
             </select>
-
             <select name="user" value={filters.user} onChange={handleFilterChange} className="filter-select">
               <option value="">All Users</option>
               {USERS.map(u => <option key={u} value={u}>{u}</option>)}
             </select>
-            
             {(filters.sponsor || filters.study || filters.user) && (
                 <button className="clear-filters-btn" onClick={() => setFilters({sponsor:"", study:"", user:""})}>Clear</button>
             )}
@@ -240,22 +237,23 @@ const TicketsPage = () => {
               <th>Description</th>
               <th>Drug Name</th>
               <th>Therapeutic Indication</th>
-              <th>SLA Expired</th>
+              <th>SLA Status</th>
               <th>Status</th>
               <th>Assigned User</th>
               <th onClick={() => sortBy("created_at")} className="sortable">
-               Time_since_ticket {sortConfig.key === "created_at" && (sortConfig.direction === "asc" ? <FaSortUp /> : <FaSortDown />)}
+                Created Time {sortConfig.key === "created_at" && (sortConfig.direction === "asc" ? <FaSortUp /> : <FaSortDown />)}
               </th>
             </tr>
           </thead>
           <tbody>
             {filteredTickets.map((t) => {
-              const expired = isSLAExpired(t.created_at);
+              const sla = getSLAStatus(t.created_at);
               return (
                 <React.Fragment key={t.ticket_id}>
                   <tr 
                     onClick={() => toggleExpand(t.ticket_id)} 
-                    className={`clickable-row ${expandedTicket === t.ticket_id ? "active-row" : ""} ${expired ? "sla-expired-row" : ""}`}
+                    className={`clickable-row ${expandedTicket === t.ticket_id ? "active-row" : ""}`}
+                    style={{ backgroundColor: sla.color }}
                   >
                     <td>{t.ticket_id}</td>
                     <td>{t.source}</td>
@@ -265,8 +263,8 @@ const TicketsPage = () => {
                     <td>{t.project_description}</td>
                     <td>{t.drug_name}</td>
                     <td>{t.therapeutic_indication}</td>
-                    <td style={{ fontWeight: 'bold', color: expired ? '#d9534f' : 'inherit' }}>
-                        {expired ? "Yes" : "No"}
+                    <td style={{ fontWeight: 'bold', color: sla.textColor }}>
+                        {sla.label}
                     </td>
                     <td><span className={getStatusClass(t.status)}>{t.status}</span></td>
                     <td>{t.assigned_user}</td>
@@ -275,7 +273,6 @@ const TicketsPage = () => {
 
                   {expandedTicket === t.ticket_id && (
                     <tr className="expanded-row">
-                      {/* colSpan adjusted to 12 for Admin, 10 for others due to new SLA column */}
                       <td colSpan={role === "Admin" ? 12 : 10}>
                         <div className="compact-expansion-wrapper">
                           <div className="action-button-group">
