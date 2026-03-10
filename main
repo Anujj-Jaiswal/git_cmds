@@ -1,161 +1,552 @@
-import time
+# document_processor.py
 import os
+import json
+import time
 from pathlib import Path
+from PyPDF2 import PdfReader
 from dotenv import load_dotenv
+import google.generativeai as genai
+from google.api_core import exceptions as g_exceptions
 from db import crud
-from mail import graph_client
-from files import eml_handler, pdf_converter
-from logs.audit_logger import log
-from files import document_processor
+from db.fetch_documents import get_documents_for_ticket
 
+# --------------------------
+# Config (tweakable)
+# --------------------------
+MODEL_NAME = "gemini-2.5-flash"
+API_RETRY_MAX = 4              # number of attempts for transient failures
+API_BACKOFF_BASE = 1.5         # exponential backoff base seconds
+MAX_PROMPT_CHARS = 120_000     # maximum size to treat as "large"
+INITIAL_CHUNK_PAGES = 8        # starting pages per chunk
+CONF_SCALE_THRESHOLD = 1.1
+
+# --------------------------
+# Init
+# --------------------------
 load_dotenv()
+API_KEY = os.getenv("GOOGLE_API_KEY")
+if not API_KEY:
+    raise ValueError("Google API key missing in .env")
+genai.configure(api_key=API_KEY)
+model = genai.GenerativeModel(MODEL_NAME)
 
-# Ensure this path is correct for your environment
-BASE_PATH = r"C:\Users\2000147565\Fortrea_Demo\processing_scripts\store\TICKETS"
+# Load schema
+with open("fields.json", "r", encoding="utf-8") as fh:
+    ALL_FIELDS = json.load(fh)["fields"]
 
-def main():
-    # Attempt to acquire token immediately to trigger Device Flow if needed
+# Exclude fields where field_name == subgroup_name (case-insensitive)
+FIELDS_SCHEMA = [
+    f for f in ALL_FIELDS
+    if str(f.get("field_name", "")).strip().lower() != str(f.get("subgroup_name", "")).strip().lower()
+]
+
+SCHEMA_MINIMAL = [
+    {"field_code": f.get("field_code"), "field_name": f.get("field_name"),
+     "data_type": f.get("data_type"), "description": f.get("description", "")}
+    for f in FIELDS_SCHEMA
+]
+
+# --------------------------
+# Helpers
+# --------------------------
+def read_pdf_pages(pdf_path):
+    p = Path(pdf_path)
+    reader = PdfReader(p)
+    pages = []
+    for i, page in enumerate(reader.pages, start=1):
+        text = page.extract_text() or ""
+        pages.append({
+            "document_name": p.name,
+            "document_path": str(p.resolve()),
+            "page_number": i,
+            "text": text
+        })
+    return pages
+
+
+def extract_all_pages(docs):
+    all_pages = []
+    doc_map = {}
+    for d in docs:
+        path = str(Path(d["path"]).resolve())
+        pages = read_pdf_pages(path)
+        doc_map[path] = pages
+        all_pages.extend(pages)
+    return all_pages, doc_map
+
+
+def clean_code_fence(text):
+    t = text.strip()
+    if t.startswith("```"):
+        t = t.strip("`")
+        if t.lower().startswith("json"):
+            t = t[4:].strip()
+        if t.endswith("```"):
+            t = t[:-3].strip()
+    return t
+
+
+def parse_json_text(text):
+    txt = clean_code_fence(text)
     try:
-        graph_client.get_fresh_token()
-        print("Initial token check passed. Application active.")
-    except Exception as e:
-        print(f"FATAL ERROR during initial token acquisition: {e}")
-        return # Exit if authentication fails
+        return json.loads(txt)
+    except Exception:
+        # fallback: slice between first [ and last ]
+        try:
+            start = txt.index("[")
+            end = txt.rindex("]") + 1
+            return json.loads(txt[start:end])
+        except Exception:
+            # fallback try object
+            try:
+                start = txt.index("{")
+                end = txt.rindex("}") + 1
+                return json.loads(txt[start:end])
+            except Exception:
+                raise
 
-    # The high-level diagram illustrating the ticket processing steps:
-    # Fetch -> Process -> Convert -> LLM -> Close Ticket
 
-    while True:  # keep checking for new emails
-        emails = graph_client.fetch_unread_emails()
-        
-        if not emails:
-            print("No mail found. Recheck in 10 seconds...")
-            # Added a cleaner wait loop
-            for i in range(10, 0, -1):
-                print(f"Rechecking in {i} sec", end="\r")
-                time.sleep(1)
+def normalize_confidence(raw):
+    try:
+        if raw is None:
+            return 0.0
+        c = float(raw)
+        if c <= CONF_SCALE_THRESHOLD:
+            c = c * 100.0
+        return round(c, 2)
+    except Exception:
+        return 0.0
+
+
+def normalize_value(v):
+    if v is None:
+        return None
+    if isinstance(v, (int, float, bool)):
+        return str(v)
+    if isinstance(v, str):
+        return v
+    if isinstance(v, list):
+        # return first scalar if present, else JSON
+        for el in v:
+            if isinstance(el, (str, int, float, bool)):
+                return str(el)
+        return json.dumps(v, ensure_ascii=False)
+    if isinstance(v, dict):
+        for k in ("value", "text", "name"):
+            if k in v and v[k] is not None:
+                return str(v[k])
+        return json.dumps(v, ensure_ascii=False)
+    return str(v)
+
+
+def match_snippet_to_pages(snippet, pages):
+    if not snippet:
+        return None, None, None
+    s = snippet.strip()
+    for p in pages:
+        t = p.get("text") or ""
+        if not t:
             continue
-        
-        for mail in emails:
-            subject = mail.get("subject", "No Subject")
-            sender = mail.get("from", {}).get("emailAddress", {}).get("address", "")
-            # Using the delegated user's email for the receiver context, 
-            # though SHARED_MAILBOX might still be used for tracking in your system.
-            receiver = os.getenv("DELEGATED_USER_EMAIL", "unknown_mailbox@default.com") 
-            internet_msg_id = mail.get("id")
-            print(f"\nFound mail\nProcessing mail -w- {subject}")
-            
-            # --- TICKET METADATA (Kept consistent) ---
-            tenant_id = "TNT001"
-            project_id = "PRJ001"
-            client_id = "CLI001"
-
-            # --- 1. MESSAGE AND TICKET CREATION ---
-            
-            # Insert message 
-            message_id = crud.insert_message(
-                tenant_id, sender, receiver, subject, internet_msg_id, ""
-            )
-
-            # Assign user
-            user_id = crud.get_active_safety_reviewer(tenant_id)
-            
-            # Insert ticket
-            ticket_id = crud.insert_ticket(message_id, tenant_id, user_id, project_id)
-            log("Ticket", "Success", f"Ticket_id Raised (status: New) , User assigned {user_id}")
-
-            # --- AUDIT LOGS (ADDED) ---
-            crud.log_field_audit_event(ticket_id, "TICKET_CREATED", "SYSTEM", f"New ticket created for email '{subject}'")
-            crud.log_field_audit_event(ticket_id, "USER_ASSIGNED", "SYSTEM", f"User '{user_id}' assigned to ticket")
+        if s in t:
+            return p["document_name"], p["document_path"], p["page_number"]
+        if len(s) > 120 and s[:120] in t:
+            return p["document_name"], p["document_path"], p["page_number"]
+    return None, None, None
 
 
-            # --- 2. FILE MANAGEMENT AND EML DOWNLOAD ---
-            
-            # Create ticket directory
-            ticket_dir = os.path.join(BASE_PATH, ticket_id)
-            os.makedirs(os.path.join(ticket_dir, "attachments"), exist_ok=True)
+def chunk_pages_list(pages, size):
+    for i in range(0, len(pages), size):
+        yield pages[i:i+size]
 
-            # Download EML
-            eml_path = os.path.join(ticket_dir, "raw_email.eml")
-            # This uses the new graph_client with the cached delegated token
-            graph_client.download_eml(internet_msg_id, eml_path)
-            log("EML Download", "Success", f"Archived Email Message (.eml) @ {eml_path}")
-            crud.update_message_eml_path(message_id, eml_path) # Update path in DB
 
-            # Extract attachments and body
-            body_text, attachments = eml_handler.extract_attachments(eml_path, ticket_dir)
+def get_next_field_counter(cur):
+    cur.execute("SELECT field_id FROM fields ORDER BY created_at DESC LIMIT 1")
+    last = cur.fetchone()
+    last_id = None
+    if last:
+        if isinstance(last, dict):
+            last_id = list(last.values())[0]
+        else:
+            last_id = last[0]
+    if last_id:
+        try:
+            return int(str(last_id).lstrip("F")) + 1
+        except Exception:
+            return 1
+    return 1
 
-            # --- 3. CONVERSION TO PDF ---
-            
-            # Email body to PDF
-            email_pdf_path = os.path.join(ticket_dir, "attachments", "email_body.pdf")
-            pdf_converter.save_email_body_pdf(body_text, email_pdf_path)
-            crud.insert_document(
-                tenant_id, ticket_id, message_id,
-                "email_body.pdf", email_pdf_path, "Email Body"
-            )
+# --------------------------
+# Prompts
+# --------------------------
+def build_patient_discovery_prompt(doc_pages_map):
+    docs_parts = []
+    for doc_path, pages in doc_pages_map.items():
+        previews = []
+        for p in pages[:2]:
+            previews.append((p.get("text") or "")[:350].replace("\n", " ").strip())
+        docs_parts.append({
+            "document_path": doc_path,
+            "document_name": Path(doc_path).name,
+            "preview": " || ".join(previews)
+        })
+    docs_json = json.dumps(docs_parts, ensure_ascii=False, indent=2)
+    prompt = f"""
+You are a concise classifier for Individual Case Safety Reports (ICSR).
+I will give a list of documents with short previews.
+Task:
+  * The email body (the entire parsed text) may contain specifed multiple patients, in such scenarios have individual record created for each patient in the DB.
+  1) Determine how many unique patient reports are present.
+  2) For each document, list which patient it belongs to using labels "PATIENT_1", "PATIENT_2", ...
+  3) If a document is non-patient or unlinked, set docs=[] for that patient or omit.
 
-            # Attachments to PDF
-            pdf_files = [email_pdf_path]
-            for att_path in attachments:
-                ext = os.path.splitext(att_path)[1].lower()
-                pdf_name = f"{Path(att_path).stem}.pdf"
-                pdf_path = os.path.join(ticket_dir, "attachments", pdf_name)
+Return EXACTLY this JSON object:
+{{ "patients":[ {{ "patient_label": "PATIENT_1", "docs": ["<path>", ...] }}, ... ] }}
 
-                if ext == ".txt":
-                    pdf_converter.txt_to_pdf(att_path, pdf_path)
-                elif ext in [".doc", ".docx"]:
-                    pdf_converter.docx_to_pdf(att_path, pdf_path)
-                elif ext == ".pdf":
-                    # If it's already a PDF, move it to the standardized path if necessary
-                    if att_path != pdf_path:
-                        os.replace(att_path, pdf_path)
+Documents:
+{docs_json}
+"""
+    return prompt.strip()
+
+
+def build_extraction_prompt(pages):
+    template_json = json.dumps(SCHEMA_MINIMAL, ensure_ascii=False, indent=2)
+    parts = []
+    for p in pages:
+        parts.append(f"[Doc: {p['document_name']} | Page: {p['page_number']} | Path: {p['document_path']}]\n{p['text']}")
+    pages_ctx = "\n\n---\n\n".join(parts)
+    prompt = f"""
+You are a precise pharmacovigilance extraction system.
+
+I will give:
+1) TEMPLATE: JSON array of fields (field_code, field_name, data_type, description).
+2) Document pages for one patient.
+
+TASK:
+Return a JSON ARRAY, one object per TEMPLATE field (SAME ORDER). Each object must contain EXACTLY:
+  field_code, field_name, patient_id, value, confidence_score, text_snippet, document_name, document_path, page_number
+
+- patient_id: e.g. "PAT-001" or null.
+- value: scalar string/number/boolean or null.
+    * For lab results / investigations / vital signs → include ALL relevant measurements 
+      as a multiline string block. Do NOT return only one test.
+- confidence_score: numeric 0-100 (percentage).
+- text_snippet: exact fragment used ("" if none).
+- document_name/path/page_number: citation (null if none).
+
+Return ONLY the JSON array (no comments).
+
+TEMPLATE:
+{template_json}
+
+DOCUMENT PAGES:
+{pages_ctx}
+"""
+    return prompt.strip()
+
+# --------------------------
+# Resilient LLM call
+# --------------------------
+def safe_generate(prompt, max_retries=API_RETRY_MAX):
+    """Call model.generate_content with retries and exponential backoff on transient errors."""
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            resp = model.generate_content(prompt)
+            return resp.text
+        except (g_exceptions.DeadlineExceeded,
+                g_exceptions.ServiceUnavailable,
+                g_exceptions.InternalServerError,
+                g_exceptions.TooManyRequests,
+                g_exceptions.ServerError) as e:
+            if attempt >= max_retries:
+                # rethrow to caller after final attempt
+                raise
+            wait = (API_BACKOFF_BASE ** attempt)
+            # jitter
+            wait = wait * (0.8 + 0.4 * (os.urandom(1)[0] / 255.0))
+            time.sleep(wait)
+            continue
+        except Exception:
+            # non-transient unknown error — bubble up
+            raise
+
+# --------------------------
+# Main processor
+# --------------------------
+def process_ticket_documents(ticket_id, ticket_dir):
+    print(f"[INFO] Processing documents for Ticket: {ticket_id}")
+
+    docs = get_documents_for_ticket(ticket_id)
+    if not docs:
+        print("[INFO] No documents found for ticket.")
+        return None, {}
+
+    all_pages, doc_pages_map = extract_all_pages(docs)
+    if not all_pages:
+        print("[INFO] No pages extracted.")
+        return None, {}
+
+    # If only one document -> treat single patient
+    if len(doc_pages_map) == 1:
+        raw_patient_map = [{"patient_label": "PATIENT_1", "docs": list(doc_pages_map.keys())}]
+    else:
+        # Ask LLM to map docs -> patients (small prompt)
+        prompt = build_patient_discovery_prompt(doc_pages_map)
+        try:
+            resp_text = safe_generate(prompt)
+            parsed = parse_json_text(resp_text)
+            patients = parsed.get("patients") if isinstance(parsed, dict) else None
+            if not patients or not isinstance(patients, list):
+                raw_patient_map = [{"patient_label": "PATIENT_1", "docs": list(doc_pages_map.keys())}]
+            else:
+                raw_patient_map = []
+                for p in patients:
+                    label = p.get("patient_label")
+                    docs_list = p.get("docs") or []
+                    # normalize doc paths
+                    docs_norm = []
+                    for d in docs_list:
+                        try:
+                            rp = str(Path(d).resolve())
+                        except Exception:
+                            rp = d
+                        if rp in doc_pages_map:
+                            docs_norm.append(rp)
+                    if docs_norm:
+                        raw_patient_map.append({"patient_label": label, "docs": docs_norm})
+                if not raw_patient_map:
+                    raw_patient_map = [{"patient_label": "PATIENT_1", "docs": list(doc_pages_map.keys())}]
+        except Exception:
+            # fallback to single patient
+            raw_patient_map = [{"patient_label": "PATIENT_1", "docs": list(doc_pages_map.keys())}]
+
+    # Build patient->pages ordered mapping
+    patient_to_pages = {}
+    for entry in raw_patient_map:
+        label = entry["patient_label"]
+        pages_bucket = []
+        for docp in entry["docs"]:
+            pages_bucket.extend(doc_pages_map.get(docp, []))
+        patient_to_pages[label] = pages_bucket
+
+    # Normalize labels to PAT-001...PAT-00N
+    orig_labels = list(patient_to_pages.keys())
+    normalized_map = {lab: f"PAT-{str(i+1).zfill(3)}" for i, lab in enumerate(orig_labels)}
+    patient_pages = {normalized_map[lab]: patient_to_pages[lab] for lab in orig_labels}
+
+    # Per-patient extraction with robust retry & adaptive chunking
+    extracted_by_patient = {}
+    for pat_id, pages in patient_pages.items():
+        # decide chunk size adaptively: start with INITIAL_CHUNK_PAGES
+        chunk_size = INITIAL_CHUNK_PAGES
+        candidates = {}
+
+        def run_extract_pages_with_adaptive(pages_list):
+            nonlocal candidates, chunk_size
+            # create list of page groups to attempt
+            groups = list(chunk_pages_list(pages_list, chunk_size))
+            for grp in groups:
+                # if prompt too large, split the group visually
+                prompt = build_extraction_prompt(grp)
+                # If prompt size huge, reduce group length
+                if len(prompt) > MAX_PROMPT_CHARS:
+                    # shrink chunk_size and retry outer loop by returning False
+                    return False
+                # Try safe_generate; on transient failure, we will adaptively reduce chunk_size and retry from start
+                try:
+                    resp_text = safe_generate(prompt)
+                except Exception as e:
+                    # transient or hard failure for this chunk -> indicate failure to caller for adaptive handling
+                    return False
+                # parse response
+                try:
+                    arr = parse_json_text(resp_text)
+                except Exception:
+                    # parsing failed for this grp -> treat as failure to trigger fallback
+                    return False
+                if not isinstance(arr, list):
+                    # unexpected -> continue but treat as failure to be safe
+                    return False
+                # iterate results
+                for obj in arr:
+                    if not isinstance(obj, dict):
+                        continue
+                    code = obj.get("field_code")
+                    if not code:
+                        continue
+                    raw_conf = obj.get("confidence_score", 0.0)
+                    conf = normalize_confidence(raw_conf)
+                    val_norm = normalize_value(obj.get("value"))
+                    snippet = obj.get("text_snippet") or ""
+                    dname = obj.get("document_name")
+                    dpath = obj.get("document_path")
+                    pno = obj.get("page_number")
+                    if (not dpath or not dname or pno is None) and snippet:
+                        dn, dp, pn = match_snippet_to_pages(snippet, pages)
+                        if dn and dp and pn:
+                            dname = dname or dn
+                            dpath = dpath or dp
+                            pno = pno or pn
+                    cand = {
+                        "value": val_norm,
+                        "confidence_score": conf,
+                        "text_snippet": snippet,
+                        "document_name": dname,
+                        "document_path": dpath,
+                        "page_number": pno
+                    }
+                    existing = candidates.get(code)
+                    if not existing or cand["confidence_score"] > existing["confidence_score"]:
+                        candidates[code] = cand
+            return True
+
+        # Adaptive loop: try running with current chunk_size; on False, halve chunk_size and retry until 1
+        success = False
+        while chunk_size >= 1 and not success:
+            ok = run_extract_pages_with_adaptive(pages)
+            if ok:
+                success = True
+                break
+            else:
+                # reduce chunk size to try more granular calls
+                if chunk_size == 1:
+                    # as final fallback, try per-page single prompts
+                    # attempt each page separately
+                    for single in pages:
+                        try:
+                            prompt = build_extraction_prompt([single])
+                            resp_text = safe_generate(prompt)
+                            arr = parse_json_text(resp_text)
+                        except Exception:
+                            continue
+                        if not isinstance(arr, list):
+                            continue
+                        for obj in arr:
+                            if not isinstance(obj, dict):
+                                continue
+                            code = obj.get("field_code")
+                            if not code:
+                                continue
+                            raw_conf = obj.get("confidence_score", 0.0)
+                            conf = normalize_confidence(raw_conf)
+                            val_norm = normalize_value(obj.get("value"))
+                            snippet = obj.get("text_snippet") or ""
+                            dname = obj.get("document_name") or single.get("document_name")
+                            dpath = obj.get("document_path") or single.get("document_path")
+                            pno = obj.get("page_number") or single.get("page_number")
+                            cand = {
+                                "value": val_norm,
+                                "confidence_score": conf,
+                                "text_snippet": snippet,
+                                "document_name": dname,
+                                "document_path": dpath,
+                                "page_number": pno
+                            }
+                            existing = candidates.get(code)
+                            if not existing or cand["confidence_score"] > existing["confidence_score"]:
+                                candidates[code] = cand
+                    success = True
+                    break
                 else:
-                    continue  # Skip unsupported file types
+                    chunk_size = max(1, chunk_size // 2)
+                    # reset candidates to avoid mixing partial results from previous attempt
+                    candidates = {}
+                    continue
 
-                pdf_files.append(pdf_path)
-                crud.insert_document(
-                    tenant_id, ticket_id, message_id,
-                    pdf_name, pdf_path, "Attachment"
-                )
-            
-            # Consolidated PDF
-            consolidated_path = os.path.join(ticket_dir, "attachments", "consolidated.pdf")
-            pdf_converter.generate_consolidated_pdf(pdf_files, consolidated_path)
-            crud.insert_document(
-                tenant_id, ticket_id, message_id,
-                "consolidated.pdf", consolidated_path, "Consolidated"
-            )
-            log("Attachments", "Success", "Attachments Extracted & Parsed")
+        extracted_by_patient[pat_id] = candidates
 
-            # --- 4. LLM PROCESSING & REVIEW QUEUE (ADDED) ---
+    # Build final output: ensure every template field present for every patient
+    final_output = []
+    for pat_id in sorted(patient_pages.keys()):
+        candidates = extracted_by_patient.get(pat_id, {})
+        for f in FIELDS_SCHEMA:
+            code = f.get("field_code")
+            cand = candidates.get(code)
+            if cand:
+                value = cand.get("value")
+                conf = cand.get("confidence_score", 0.0)
+                snippet = cand.get("text_snippet", "")
+                doc_name = cand.get("document_name")
+                doc_path = cand.get("document_path")
+                page_number = cand.get("page_number")
+            else:
+                value = None
+                conf = 0.0
+                snippet = ""
+                doc_name = None
+                doc_path = None
+                page_number = None
+            final_output.append({
+                "patient_id": pat_id,
+                "group_code": f.get("group_code"),
+                "group_name": f.get("group_name"),
+                "subgroup_code": f.get("subgroup_code"),
+                "subgroup_name": f.get("subgroup_name"),
+                "field_code": code,
+                "field_name": f.get("field_name"),
+                "field_type": f.get("data_type"),
+                "value": value,
+                "confidence_score": conf,
+                "text_snippet": snippet,
+                "document_name": doc_name,
+                "document_path": doc_path,
+                "page_number": page_number
+            })
 
-            # Update status → Under Process (ADDED)
-            crud.update_ticket_status(ticket_id, "Under Process")
+    # Save output.json
+    output_path = os.path.join(ticket_dir, "output.json")
+    with open(output_path, "w", encoding="utf-8") as outf:
+        json.dump(final_output, outf, indent=2, ensure_ascii=False)
+    print(f"[SUCCESS] Saved extracted data -> {output_path}")
 
-            # Run LLM document processing (ADDED)
-            output_json_path, patient_records = document_processor.process_ticket_documents(ticket_id, ticket_dir)
-            log("LLM Processing", "Success", f"Document fields extracted and saved @ {output_json_path}")
+    # Insert into DB: create records per patient and insert fields
+    conn = crud.get_connection()
+    cur = conn.cursor()
+    message_id = crud.get_message_id_for_ticket(ticket_id)
+    tenant_id = crud.get_tenant_for_ticket(ticket_id)
 
-            # Audit log events (ADDED)
-            crud.log_field_audit_event(ticket_id, "AI_EXTRACTION_COMPLETED", "SYSTEM", f"AI extraction completed for ticket {ticket_id}")
-            for patient_id, record_id in patient_records.items():
-                crud.log_field_audit_event(ticket_id, "RECORD_CREATED", "SYSTEM", f"Record created for patient {patient_id}")
+    # create records for each patient label (ordered)
+    patient_to_record = {}
+    ordered_pat_ids = sorted(patient_pages.keys())
+    for pat in ordered_pat_ids:
+        rec = crud.insert_record(cur, tenant_id, ticket_id, message_id, pat)
+        patient_to_record[pat] = rec
 
-            # ADDED LOG FOR HITL QUEUE (ADDED)
-            crud.log_field_audit_event(ticket_id, "HITL_QUEUED", "SYSTEM", "Records automatically queued for Human-In-The-Loop review.")
-            log("Review Queue", "Success", "Records queued for human review.")
-            
-            # --- 5. FINAL STATUS & CLEANUP (ADDED) ---
-            
-            # Close ticket (ADDED)
-            crud.update_ticket_status(ticket_id, "Closed")
-            log("Ticket", "Success", f"Ticket {ticket_id} marked as 'Closed'")
+    # start field counter
+    field_counter = get_next_field_counter(cur)
+    for row in final_output:
+        pat = row["patient_id"]
+        record_id = patient_to_record.get(pat)
+        db_field = {
+            "group_code": row.get("group_code"),
+            "group_name": row.get("group_name"),
+            "subgroup_code": row.get("subgroup_code"),
+            "subgroup_name": row.get("subgroup_name"),
+            "field_code": row.get("field_code"),
+            "field_name": row.get("field_name"),
+            "field_type": row.get("field_type"),
+            "value": row.get("value"),
+            "confidence_score": row.get("confidence_score"),
+            "document_name": row.get("document_name"),
+            "page_number": row.get("page_number"),
+            "text_snippet": row.get("text_snippet"),
+            "document_path": row.get("document_path")
+        }
+        crud.insert_field(
+            cur,
+            tenant_id,
+            ticket_id,
+            message_id,
+            pat,
+            record_id,
+            db_field,
+            field_counter
+        )
+        field_counter += 1
 
-            # Mark email as read/delete in Graph API mailbox
-            # This uses the new graph_client with the cached delegated token
-            graph_client.mark_email_as_read(internet_msg_id)
-            log("Mail Status", "Success", f"Mail {internet_msg_id} marked as read/processed in Graph Mailbox")
+    conn.commit()
+    cur.close()
+    conn.close()
 
-if __name__ == "__main__":
-    main()
+    return output_path, patient_to_record
