@@ -93,36 +93,11 @@ const MOCK_TICKETS = [
     site: "Royal Marsden Hospital",
     country: "UK",
     created_at: "2026-02-21T18:21:53"
-  },
-  {
-    ticket_id: "TKT-20260220-000007",
-    source: "Email",
-    tenant_name: "Fortrea",
-    client_name: "GSK",
-    project_key: "PROJ-GSK-RESP7",
-    project_description: "Respiratory vaccine development",
-    status: "Closed",
-    assigned_user: "Neha Verma",
-    site: "Apollo Hospital",
-    country: "India",
-    created_at: "2026-02-20T17:14:36"
-  },
-  {
-    ticket_id: "TKT-20260219-000008",
-    source: "Email",
-    tenant_name: "Fortrea",
-    client_name: "Merck",
-    project_key: "PROJ-MRK-ONC8",
-    project_description: "Solid tumor therapy study",
-    status: "Closed",
-    assigned_user: "Vikram Singh",
-    site: "Mayo Clinic",
-    country: "USA",
-    created_at: "2026-02-19T16:02:27"
   }
 ];
 
 const MainPage = () => {
+
   const { role } = useRole();
 
   const [stats, setStats] = useState({
@@ -151,19 +126,16 @@ const MainPage = () => {
     { name: "Rejected", value: stats.rejected_records, color: "#dc3545" }
   ];
 
-  /* Emails per site derived from ticket data */
-
   const emailsPerSite = Object.values(
     tickets.reduce((acc, ticket) => {
-      if (!acc[ticket.site]) {
-        acc[ticket.site] = { site: ticket.site, emails: 0 };
-      }
+      if (!acc[ticket.site]) acc[ticket.site] = { site: ticket.site, emails: 0 };
       acc[ticket.site].emails += 1;
       return acc;
     }, {})
   );
 
   useEffect(() => {
+
     const uniqueSponsors = [...new Set(MOCK_TICKETS.map(t => t.client_name))].map((name, index) => ({
       client_id: index,
       name,
@@ -179,47 +151,7 @@ const MainPage = () => {
     setClients(uniqueSponsors);
     setProjects(activeStudies);
 
-    const fetchData = async () => {
-      try {
-        const statsRes = await axios.get("http://127.0.0.1:8000/dashboard/stats");
-        const apiStats = statsRes.data;
-
-        setStats({
-          new_tickets_today: (apiStats.new_tickets_today || 0) + 1,
-          total_tickets: MOCK_TICKETS.length + (apiStats.total_tickets || 0),
-          pending_records: 2 + (apiStats.pending_records || 0),
-          under_review_records: 2 + (apiStats.under_review_records || 0),
-          approved_records: 2 + (apiStats.approved_records || 0),
-          rejected_records: 1 + (apiStats.rejected_records || 0)
-        });
-
-        const ticketsRes = await axios.get("http://127.0.0.1:8000/dashboard/recent-tickets");
-
-        if (ticketsRes.data.recent_tickets?.length > 0) {
-
-          const apiTicketsWithSites = ticketsRes.data.recent_tickets.map((t, i) => {
-            const site = MOCK_SITES[i % MOCK_SITES.length];
-            return {
-              ...t,
-              site: site.name,
-              country: site.country
-            };
-          });
-
-          const combined = [...apiTicketsWithSites, ...MOCK_TICKETS].sort(
-            (a, b) => new Date(b.created_at) - new Date(a.created_at)
-          );
-
-          setTickets(combined);
-        }
-
-      } catch (err) {
-        console.error("Error fetching dashboard data", err);
-      }
-    };
-
-    fetchData();
-  }, [role]);
+  }, []);
 
   const getStatusClass = (status) => {
     switch (status.toLowerCase()) {
@@ -245,6 +177,7 @@ const MainPage = () => {
   };
 
   return (
+
     <div className="mainpage-wrapper">
 
       {/* ---------------- CARDS ---------------- */}
@@ -281,13 +214,70 @@ const MainPage = () => {
           <div className="card-count">{stats.approved_records}</div>
         </div>
 
-        {/* Sites card */}
+        {/* Active Sponsors */}
+
+        {role === "Admin" && (
+
+          <div
+            className="dashboard-card hoverable card-light"
+            onMouseEnter={() => setHoverClient(clients)}
+            onMouseLeave={() => setHoverClient(null)}
+          >
+
+            <div className="card-title">Active Sponsors</div>
+            <div className="card-count">{clients.length}</div>
+
+            {hoverClient && (
+              <div className="hover-details">
+                <div className="hover-header">Active Sponsors</div>
+                {hoverClient.map(c => (
+                  <div key={c.client_id} className="hover-item">
+                    {c.name} ({c.client_key})
+                  </div>
+                ))}
+              </div>
+            )}
+
+          </div>
+
+        )}
+
+        {/* Active Studies */}
+
+        {role === "Admin" && (
+
+          <div
+            className="dashboard-card hoverable card-light"
+            onMouseEnter={() => setHoverProject(projects)}
+            onMouseLeave={() => setHoverProject(null)}
+          >
+
+            <div className="card-title">Active Studies</div>
+            <div className="card-count">{projects.length}</div>
+
+            {hoverProject && (
+              <div className="hover-details">
+                <div className="hover-header">Active Studies</div>
+                {hoverProject.slice(0, 5).map(p => (
+                  <div key={p.project_id} className="hover-item">
+                    {p.description}
+                  </div>
+                ))}
+              </div>
+            )}
+
+          </div>
+
+        )}
+
+        {/* Sites */}
 
         <div
           className="dashboard-card hoverable card-light"
           onMouseEnter={() => setHoverSite(MOCK_SITES)}
           onMouseLeave={() => setHoverSite(null)}
         >
+
           <div className="card-title">Number of Sites</div>
           <div className="card-count">{MOCK_SITES.length}</div>
 
@@ -301,21 +291,22 @@ const MainPage = () => {
               ))}
             </div>
           )}
+
         </div>
 
       </div>
 
-      {/* ---------------- VISUALS ---------------- */}
+      {/* ---------------- CHARTS ROW ---------------- */}
 
-      <div className="dashboard-visuals">
+      <div className="dashboard-visuals" style={{display:"flex",gap:"30px"}}>
 
-        {/* Status Chart */}
+        <div style={{flex:1}}>
 
-        <div className="chart-section">
           <h3 className="section-title">Record Status Distribution</h3>
 
           <div style={{ width: "100%", height: 300 }}>
             <ResponsiveContainer>
+
               <PieChart>
 
                 <Pie
@@ -336,86 +327,91 @@ const MainPage = () => {
                 <Legend />
 
               </PieChart>
+
             </ResponsiveContainer>
           </div>
+
         </div>
 
-        {/* Emails per Site */}
+        <div style={{flex:1}}>
 
-        <div className="chart-section">
           <h3 className="section-title">Emails per Site</h3>
 
           <div style={{ width: "100%", height: 300 }}>
             <ResponsiveContainer>
+
               <BarChart data={emailsPerSite}>
 
-                <CartesianGrid strokeDasharray="3 3" />
+                <CartesianGrid strokeDasharray="3 3"/>
+                <XAxis dataKey="site"/>
+                <YAxis/>
+                <Tooltip/>
 
-                <XAxis dataKey="site" />
-                <YAxis />
-
-                <Tooltip />
-
-                <Bar dataKey="emails" fill="#007bff" />
+                <Bar dataKey="emails" fill="#007bff"/>
 
               </BarChart>
+
             </ResponsiveContainer>
           </div>
-        </div>
-
-        {/* Recent Tickets */}
-
-        <div className="recent-tickets-table-container">
-
-          <h3 className="section-title">Recent Tickets</h3>
-
-          <table className="tickets-table">
-
-            <thead>
-              <tr>
-                <th>Ticket ID</th>
-                <th>Study Description</th>
-                <th>Site</th>
-                <th>Country</th>
-                <th>Status</th>
-                <th>Inbound Source</th>
-                <th>Assigned User</th>
-                <th>Created At</th>
-              </tr>
-            </thead>
-
-            <tbody>
-
-              {tickets.slice(0, 5).map((t) => (
-
-                <tr key={t.ticket_id}>
-
-                  <td className="ticket-id">{t.ticket_id}</td>
-                  <td>{t.project_description}</td>
-                  <td>{t.site}</td>
-                  <td>{t.country}</td>
-
-                  <td>
-                    <span className={`status-cell ${getStatusClass(t.status)}`}>
-                      {t.status}
-                    </span>
-                  </td>
-
-                  <td>{t.source}</td>
-                  <td>{t.assigned_user}</td>
-                  <td>{getFormattedDate(t.created_at)}</td>
-
-                </tr>
-
-              ))}
-
-            </tbody>
-
-          </table>
 
         </div>
 
       </div>
+
+      {/* ---------------- TABLE ---------------- */}
+
+      <div className="recent-tickets-table-container">
+
+        <h3 className="section-title">Recent Tickets</h3>
+
+        <table className="tickets-table">
+
+          <thead>
+
+            <tr>
+              <th>Ticket ID</th>
+              <th>Study Description</th>
+              <th>Site</th>
+              <th>Country</th>
+              <th>Status</th>
+              <th>Inbound Source</th>
+              <th>Assigned User</th>
+              <th>Created At</th>
+            </tr>
+
+          </thead>
+
+          <tbody>
+
+            {tickets.slice(0,5).map(t => (
+
+              <tr key={t.ticket_id}>
+
+                <td className="ticket-id">{t.ticket_id}</td>
+                <td>{t.project_description}</td>
+                <td>{t.site}</td>
+                <td>{t.country}</td>
+
+                <td>
+                  <span className={`status-cell ${getStatusClass(t.status)}`}>
+                    {t.status}
+                  </span>
+                </td>
+
+                <td>{t.source}</td>
+                <td>{t.assigned_user}</td>
+                <td>{getFormattedDate(t.created_at)}</td>
+
+              </tr>
+
+            ))}
+
+          </tbody>
+
+        </table>
+
+      </div>
+
     </div>
   );
 };
