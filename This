@@ -1,116 +1,117 @@
-      {/* ---------------- VISUALS ---------------- */}
+{/* ---------------- VISUALS ---------------- */}
 
-      <div className="dashboard-visuals">
+<div className="dashboard-visuals">
 
-        {/* Status Chart */}
+  {/* Charts Row */}
 
-        <div className="chart-section">
-          <h3 className="section-title">Record Status Distribution</h3>
+  <div style={{ display: "flex", gap: "20px", marginBottom: "20px" }}>
 
-          <div style={{ width: "100%", height: 300 }}>
-            <ResponsiveContainer>
-              <PieChart>
+    {/* Status Chart */}
 
-                <Pie
-                  data={chartData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={80}
-                  paddingAngle={5}
-                  dataKey="value"
-                >
-                  {chartData.map((entry, index) => (
-                    <Cell key={index} fill={entry.color} />
-                  ))}
-                </Pie>
+    <div className="chart-section" style={{ flex: 1 }}>
+      <h3 className="section-title">Record Status Distribution</h3>
 
-                <Tooltip />
-                <Legend />
+      <div style={{ width: "100%", height: 300 }}>
+        <ResponsiveContainer>
+          <PieChart>
 
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        {/* Emails per Site */}
-
-        <div className="chart-section">
-          <h3 className="section-title">Emails per Site</h3>
-
-          <div style={{ width: "40%", height: 300 }}>
-            <ResponsiveContainer>
-              <BarChart data={emailsPerSite}>
-
-                <CartesianGrid strokeDasharray="3 3" />
-
-                <XAxis dataKey="site" />
-                <YAxis />
-
-                <Tooltip />
-
-                <Bar dataKey="emails" fill="#007bff" />
-
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        {/* Recent Tickets */}
-
-        <div className="recent-tickets-table-container">
-
-          <h3 className="section-title">Recent Tickets</h3>
-
-          <table className="tickets-table">
-
-            <thead>
-              <tr>
-                <th>Ticket ID</th>
-                <th>Study Description</th>
-                <th>Site</th>
-                <th>Country</th>
-                <th>Status</th>
-                <th>Inbound Source</th>
-                <th>Assigned User</th>
-                <th>Created At</th>
-              </tr>
-            </thead>
-
-            <tbody>
-
-              {tickets.slice(0, 5).map((t) => (
-
-                <tr key={t.ticket_id}>
-
-                  <td className="ticket-id">{t.ticket_id}</td>
-                  <td>{t.project_description}</td>
-                  <td>{t.site}</td>
-                  <td>{t.country}</td>
-
-                  <td>
-                    <span className={`status-cell ${getStatusClass(t.status)}`}>
-                      {t.status}
-                    </span>
-                  </td>
-
-                  <td>{t.source}</td>
-                  <td>{t.assigned_user}</td>
-                  <td>{getFormattedDate(t.created_at)}</td>
-
-                </tr>
-
+            <Pie
+              data={chartData}
+              cx="50%"
+              cy="50%"
+              innerRadius={60}
+              outerRadius={80}
+              paddingAngle={5}
+              dataKey="value"
+            >
+              {chartData.map((entry, index) => (
+                <Cell key={index} fill={entry.color} />
               ))}
+            </Pie>
 
-            </tbody>
+            <Tooltip />
+            <Legend />
 
-          </table>
-
-        </div>
-
+          </PieChart>
+        </ResponsiveContainer>
       </div>
     </div>
-  );
-};
 
-export default MainPage;
+    {/* Emails per Site */}
+
+    <div className="chart-section" style={{ flex: 1 }}>
+      <h3 className="section-title">Emails per Site</h3>
+
+      <div style={{ width: "100%", height: 300 }}>
+        <ResponsiveContainer>
+          <BarChart data={emailsPerSite}>
+
+            <CartesianGrid strokeDasharray="3 3" />
+
+            <XAxis dataKey="site" />
+            <YAxis />
+
+            <Tooltip />
+
+            <Bar dataKey="emails" fill="#007bff" />
+
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+
+  </div>
+
+  {/* Recent Tickets */}
+
+  <div className="recent-tickets-table-container">
+
+    <h3 className="section-title">Recent Tickets</h3>
+
+    <table className="tickets-table">
+
+      <thead>
+        <tr>
+          <th>Ticket ID</th>
+          <th>Study Description</th>
+          <th>Site</th>
+          <th>Country</th>
+          <th>Status</th>
+          <th>Inbound Source</th>
+          <th>Assigned User</th>
+          <th>Created At</th>
+        </tr>
+      </thead>
+
+      <tbody>
+
+        {tickets.slice(0, 5).map((t) => (
+
+          <tr key={t.ticket_id}>
+
+            <td className="ticket-id">{t.ticket_id}</td>
+            <td>{t.project_description}</td>
+            <td>{t.site}</td>
+            <td>{t.country}</td>
+
+            <td>
+              <span className={`status-cell ${getStatusClass(t.status)}`}>
+                {t.status}
+              </span>
+            </td>
+
+            <td>{t.source}</td>
+            <td>{t.assigned_user}</td>
+            <td>{getFormattedDate(t.created_at)}</td>
+
+          </tr>
+
+        ))}
+
+      </tbody>
+
+    </table>
+
+  </div>
+
+</div>
