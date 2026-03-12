@@ -1,0 +1,108 @@
+<div className="cards-container">
+
+  <div className="dashboard-card card-light">
+    <div className="card-title">New Tickets Today</div>
+    <div className="card-count">{stats.new_tickets_today}</div>
+  </div>
+
+  <div className="dashboard-card card-light">
+    <div className="card-title">Emails Per Day</div>
+    <div className="card-count">{stats.new_tickets_today}</div>
+  </div>
+
+  <div className="dashboard-card card-light">
+    <div className="card-title">Total Tickets</div>
+    <div className="card-count">{stats.total_tickets}</div>
+  </div>
+
+  <div className="dashboard-card card-light">
+    <div className="card-title">Pending Records</div>
+    <div className="card-count">{stats.pending_records}</div>
+  </div>
+
+  <div className="dashboard-card card-light">
+    <div className="card-title">Under Review</div>
+    <div className="card-count">{stats.under_review_records}</div>
+  </div>
+
+  <div className="dashboard-card card-light">
+    <div className="card-title">Approved Records</div>
+    <div className="card-count">{stats.approved_records}</div>
+  </div>
+
+  {/* Sites Card */}
+
+  <div
+    className="dashboard-card hoverable card-light"
+    onMouseEnter={() => setHoverSite(MOCK_SITES)}
+    onMouseLeave={() => setHoverSite(null)}
+  >
+    <div className="card-title">Number of Sites</div>
+    <div className="card-count">{MOCK_SITES.length}</div>
+
+    {hoverSite && (
+      <div className="hover-details">
+        <div className="hover-header">Medical Sites</div>
+        {hoverSite.map((s) => (
+          <div key={s.site_id} className="hover-item">
+            {s.name} ({s.country})
+          </div>
+        ))}
+      </div>
+    )}
+  </div>
+
+  {/* Admin Cards */}
+
+  {role === "Admin" && (
+    <>
+      <div
+        className="dashboard-card hoverable card-light admin-client-card"
+        onMouseEnter={() => setHoverClient(clients)}
+        onMouseLeave={() => setHoverClient(null)}
+      >
+        <div className="card-title">Active Sponsors</div>
+        <div className="card-count">{clients.length}</div>
+
+        {hoverClient && (
+          <div className="hover-details client-hover">
+            <div className="hover-header">Active Sponsors:</div>
+            {hoverClient.map((c) => (
+              <div key={c.client_id} className="hover-item">
+                {c.name} ({c.client_key})
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div
+        className="dashboard-card hoverable card-light"
+        onMouseEnter={() => setHoverProject(projects)}
+        onMouseLeave={() => setHoverProject(null)}
+      >
+        <div className="card-title">Active Studies</div>
+        <div className="card-count">{projects.length}</div>
+
+        {hoverProject && (
+          <div className="hover-details project-hover">
+            <div className="hover-header">Active Studies:</div>
+
+            {hoverProject.slice(0, 5).map((p) => (
+              <div key={p.project_id} className="hover-item">
+                {p.description}
+              </div>
+            ))}
+
+            {hoverProject.length > 5 && (
+              <div className="hover-more">
+                ...and {hoverProject.length - 5} more
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </>
+  )}
+
+</div>
