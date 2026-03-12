@@ -1,552 +1,239 @@
-# document_processor.py
-import os
-import json
-import time
-from pathlib import Path
-from PyPDF2 import PdfReader
-from dotenv import load_dotenv
-import google.generativeai as genai
-from google.api_core import exceptions as g_exceptions
-from db import crud
-from db.fetch_documents import get_documents_for_ticket
+import React, { useEffect, useState } from "react";
+import axios from "axios";
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from "recharts";
+import "../css/mainpage.css";
+import { useRole } from "../context/RoleContext";
 
-# --------------------------
-# Config (tweakable)
-# --------------------------
-MODEL_NAME = "gemini-2.5-flash"
-API_RETRY_MAX = 4              # number of attempts for transient failures
-API_BACKOFF_BASE = 1.5         # exponential backoff base seconds
-MAX_PROMPT_CHARS = 120_000     # maximum size to treat as "large"
-INITIAL_CHUNK_PAGES = 8        # starting pages per chunk
-CONF_SCALE_THRESHOLD = 1.1
+// --- MOCK DATA ---
+const MOCK_TICKETS = [
+  { ticket_id: "TKT-20260225-000002", source: "Email", tenant_name: "Fortrea", client_name: "GSK", project_key: "PROJ-GSK-IMMUNO2", project_description: "Oncology immunotherapy study", status: "Closed", assigned_user: "Rohan Mehta", created_at: "2026-02-25T22:12:18" },
+  { ticket_id: "TKT-20260224-000003", source: "Email", tenant_name: "Fortrea", client_name: "Merck", project_key: "PROJ-MRK-DIAB3", project_description: "Type 2 diabetes trial", status: "Closed", assigned_user: "Sneha Kapoor", created_at: "2026-02-24T21:05:44" },
+  { ticket_id: "TKT-20260223-000004", source: "Email", tenant_name: "Fortrea", client_name: "Novartis", project_key: "PROJ-NVS-CARD4", project_description: "Chronic heart failure study", status: "Closed", assigned_user: "Arjun Rao", created_at: "2026-02-23T20:47:29" },
+  { ticket_id: "TKT-20260222-000005", source: "Email", tenant_name: "Fortrea", client_name: "Novo Nordisk", project_key: "PROJ-NN-OBES5", project_description: "Obesity management program", status: "Closed", assigned_user: "Priya Sharma", created_at: "2026-02-22T19:33:11" },
+  { ticket_id: "TKT-20260221-000006", source: "Email", tenant_name: "Fortrea", client_name: "Abbvie", project_key: "PROJ-ABBV-RA6", project_description: "Rheumatoid arthritis trial", status: "Closed", assigned_user: "Karan Malhotra", created_at: "2026-02-21T18:21:53" },
+  { ticket_id: "TKT-20260220-000007", source: "Email", tenant_name: "Fortrea", client_name: "GSK", project_key: "PROJ-GSK-RESP7", project_description: "Respiratory vaccine development", status: "Closed", assigned_user: "Neha Verma", created_at: "2026-02-20T17:14:36" },
+  { ticket_id: "TKT-20260219-000008", source: "Email", tenant_name: "Fortrea", client_name: "Merck", project_key: "PROJ-MRK-ONC8", project_description: "Solid tumor therapy study", status: "Closed", assigned_user: "Vikram Singh", created_at: "2026-02-19T16:02:27" },
+];
 
-# --------------------------
-# Init
-# --------------------------
-load_dotenv()
-API_KEY = os.getenv("GOOGLE_API_KEY")
-if not API_KEY:
-    raise ValueError("Google API key missing in .env")
-genai.configure(api_key=API_KEY)
-model = genai.GenerativeModel(MODEL_NAME)
+const MainPage = () => {
+  const { role } = useRole();
+  
+  // Initialize stats with Mock values only
+  const [stats, setStats] = useState({
+    new_tickets_today: 0, 
+    total_tickets: MOCK_TICKETS.length,
+    pending_records: 2,
+    under_review_records: 2,
+    approved_records: 2,
+    rejected_records: 1 // Added to track for the chart
+  });
 
-# Load schema
-with open("fields.json", "r", encoding="utf-8") as fh:
-    ALL_FIELDS = json.load(fh)["fields"]
+  const [clients, setClients] = useState([]);
+  const [projects, setProjects] = useState([]);
+  const [tickets, setTickets] = useState(MOCK_TICKETS);
+  const [hoverClient, setHoverClient] = useState(null);
+  const [hoverProject, setHoverProject] = useState(null);
 
-# Exclude fields where field_name == subgroup_name (case-insensitive)
-FIELDS_SCHEMA = [
-    f for f in ALL_FIELDS
-    if str(f.get("field_name", "")).strip().lower() != str(f.get("subgroup_name", "")).strip().lower()
-]
+  // Dynamic Chart Data based on current stats
+  const chartData = [
+    { name: "Approved", value: stats.approved_records, color: "#28a745" },
+    { name: "Pending", value: stats.pending_records, color: "#ffc107" },
+    { name: "Under-Review", value: stats.under_review_records, color: "#17a2b8" },
+    { name: "Rejected", value: stats.rejected_records, color: "#dc3545" },
+  ];
 
-SCHEMA_MINIMAL = [
-    {"field_code": f.get("field_code"), "field_name": f.get("field_name"),
-     "data_type": f.get("data_type"), "description": f.get("description", "")}
-    for f in FIELDS_SCHEMA
-]
+  useEffect(() => {
+    // Derived from MOCK_TICKETS for Sidebar/Dropdowns
+    const uniqueSponsors = [...new Set(MOCK_TICKETS.map(t => t.client_name))].map((name, index) => ({
+      client_id: index,
+      name: name,
+      client_key: name.substring(0, 3).toUpperCase()
+    }));
 
-# --------------------------
-# Helpers
-# --------------------------
-def read_pdf_pages(pdf_path):
-    p = Path(pdf_path)
-    reader = PdfReader(p)
-    pages = []
-    for i, page in enumerate(reader.pages, start=1):
-        text = page.extract_text() or ""
-        pages.append({
-            "document_name": p.name,
-            "document_path": str(p.resolve()),
-            "page_number": i,
-            "text": text
-        })
-    return pages
+    const activeStudies = MOCK_TICKETS.map((t, index) => ({
+      project_id: index,
+      description: t.project_description,
+      project_key: t.project_key
+    }));
 
+    setClients(uniqueSponsors);
+    setProjects(activeStudies);
 
-def extract_all_pages(docs):
-    all_pages = []
-    doc_map = {}
-    for d in docs:
-        path = str(Path(d["path"]).resolve())
-        pages = read_pdf_pages(path)
-        doc_map[path] = pages
-        all_pages.extend(pages)
-    return all_pages, doc_map
+    const fetchData = async () => {
+      try {
+        const statsRes = await axios.get("http://127.0.0.1:8000/dashboard/stats");
+        const apiStats = statsRes.data;
 
+        // Update stats: Mock + API
+        setStats({
+          new_tickets_today: (apiStats.new_tickets_today || 0) + 1, // Mock has 1 new today logic
+          total_tickets: MOCK_TICKETS.length + (apiStats.total_tickets || 0),
+          pending_records: 2 + (apiStats.pending_records || 0),
+          under_review_records: 2 + (apiStats.under_review_records || 0),
+          approved_records: 2 + (apiStats.approved_records || 0),
+          rejected_records: 1 + (apiStats.rejected_records || 0),
+        });
 
-def clean_code_fence(text):
-    t = text.strip()
-    if t.startswith("```"):
-        t = t.strip("`")
-        if t.lower().startswith("json"):
-            t = t[4:].strip()
-        if t.endswith("```"):
-            t = t[:-3].strip()
-    return t
-
-
-def parse_json_text(text):
-    txt = clean_code_fence(text)
-    try:
-        return json.loads(txt)
-    except Exception:
-        # fallback: slice between first [ and last ]
-        try:
-            start = txt.index("[")
-            end = txt.rindex("]") + 1
-            return json.loads(txt[start:end])
-        except Exception:
-            # fallback try object
-            try:
-                start = txt.index("{")
-                end = txt.rindex("}") + 1
-                return json.loads(txt[start:end])
-            except Exception:
-                raise
-
-
-def normalize_confidence(raw):
-    try:
-        if raw is None:
-            return 0.0
-        c = float(raw)
-        if c <= CONF_SCALE_THRESHOLD:
-            c = c * 100.0
-        return round(c, 2)
-    except Exception:
-        return 0.0
-
-
-def normalize_value(v):
-    if v is None:
-        return None
-    if isinstance(v, (int, float, bool)):
-        return str(v)
-    if isinstance(v, str):
-        return v
-    if isinstance(v, list):
-        # return first scalar if present, else JSON
-        for el in v:
-            if isinstance(el, (str, int, float, bool)):
-                return str(el)
-        return json.dumps(v, ensure_ascii=False)
-    if isinstance(v, dict):
-        for k in ("value", "text", "name"):
-            if k in v and v[k] is not None:
-                return str(v[k])
-        return json.dumps(v, ensure_ascii=False)
-    return str(v)
-
-
-def match_snippet_to_pages(snippet, pages):
-    if not snippet:
-        return None, None, None
-    s = snippet.strip()
-    for p in pages:
-        t = p.get("text") or ""
-        if not t:
-            continue
-        if s in t:
-            return p["document_name"], p["document_path"], p["page_number"]
-        if len(s) > 120 and s[:120] in t:
-            return p["document_name"], p["document_path"], p["page_number"]
-    return None, None, None
-
-
-def chunk_pages_list(pages, size):
-    for i in range(0, len(pages), size):
-        yield pages[i:i+size]
-
-
-def get_next_field_counter(cur):
-    cur.execute("SELECT field_id FROM fields ORDER BY created_at DESC LIMIT 1")
-    last = cur.fetchone()
-    last_id = None
-    if last:
-        if isinstance(last, dict):
-            last_id = list(last.values())[0]
-        else:
-            last_id = last[0]
-    if last_id:
-        try:
-            return int(str(last_id).lstrip("F")) + 1
-        except Exception:
-            return 1
-    return 1
-
-# --------------------------
-# Prompts
-# --------------------------
-def build_patient_discovery_prompt(doc_pages_map):
-    docs_parts = []
-    for doc_path, pages in doc_pages_map.items():
-        previews = []
-        for p in pages[:2]:
-            previews.append((p.get("text") or "")[:350].replace("\n", " ").strip())
-        docs_parts.append({
-            "document_path": doc_path,
-            "document_name": Path(doc_path).name,
-            "preview": " || ".join(previews)
-        })
-    docs_json = json.dumps(docs_parts, ensure_ascii=False, indent=2)
-    prompt = f"""
-You are a concise classifier for Individual Case Safety Reports (ICSR).
-I will give a list of documents with short previews.
-Task:
-  * The email body (the entire parsed text) may contain specifed multiple patients, in such scenarios have individual record created for each patient in the DB.
-  1) Determine how many unique patient reports are present.
-  2) For each document, list which patient it belongs to using labels "PATIENT_1", "PATIENT_2", ...
-  3) If a document is non-patient or unlinked, set docs=[] for that patient or omit.
-
-Return EXACTLY this JSON object:
-{{ "patients":[ {{ "patient_label": "PATIENT_1", "docs": ["<path>", ...] }}, ... ] }}
-
-Documents:
-{docs_json}
-"""
-    return prompt.strip()
-
-
-def build_extraction_prompt(pages):
-    template_json = json.dumps(SCHEMA_MINIMAL, ensure_ascii=False, indent=2)
-    parts = []
-    for p in pages:
-        parts.append(f"[Doc: {p['document_name']} | Page: {p['page_number']} | Path: {p['document_path']}]\n{p['text']}")
-    pages_ctx = "\n\n---\n\n".join(parts)
-    prompt = f"""
-You are a precise pharmacovigilance extraction system.
-
-I will give:
-1) TEMPLATE: JSON array of fields (field_code, field_name, data_type, description).
-2) Document pages for one patient.
-
-TASK:
-Return a JSON ARRAY, one object per TEMPLATE field (SAME ORDER). Each object must contain EXACTLY:
-  field_code, field_name, patient_id, value, confidence_score, text_snippet, document_name, document_path, page_number
-
-- patient_id: e.g. "PAT-001" or null.
-- value: scalar string/number/boolean or null.
-    * For lab results / investigations / vital signs → include ALL relevant measurements 
-      as a multiline string block. Do NOT return only one test.
-- confidence_score: numeric 0-100 (percentage).
-- text_snippet: exact fragment used ("" if none).
-- document_name/path/page_number: citation (null if none).
-
-Return ONLY the JSON array (no comments).
-
-TEMPLATE:
-{template_json}
-
-DOCUMENT PAGES:
-{pages_ctx}
-"""
-    return prompt.strip()
-
-# --------------------------
-# Resilient LLM call
-# --------------------------
-def safe_generate(prompt, max_retries=API_RETRY_MAX):
-    """Call model.generate_content with retries and exponential backoff on transient errors."""
-    attempt = 0
-    while True:
-        attempt += 1
-        try:
-            resp = model.generate_content(prompt)
-            return resp.text
-        except (g_exceptions.DeadlineExceeded,
-                g_exceptions.ServiceUnavailable,
-                g_exceptions.InternalServerError,
-                g_exceptions.TooManyRequests,
-                g_exceptions.ServerError) as e:
-            if attempt >= max_retries:
-                # rethrow to caller after final attempt
-                raise
-            wait = (API_BACKOFF_BASE ** attempt)
-            # jitter
-            wait = wait * (0.8 + 0.4 * (os.urandom(1)[0] / 255.0))
-            time.sleep(wait)
-            continue
-        except Exception:
-            # non-transient unknown error — bubble up
-            raise
-
-# --------------------------
-# Main processor
-# --------------------------
-def process_ticket_documents(ticket_id, ticket_dir):
-    print(f"[INFO] Processing documents for Ticket: {ticket_id}")
-
-    docs = get_documents_for_ticket(ticket_id)
-    if not docs:
-        print("[INFO] No documents found for ticket.")
-        return None, {}
-
-    all_pages, doc_pages_map = extract_all_pages(docs)
-    if not all_pages:
-        print("[INFO] No pages extracted.")
-        return None, {}
-
-    # If only one document -> treat single patient
-    if len(doc_pages_map) == 1:
-        raw_patient_map = [{"patient_label": "PATIENT_1", "docs": list(doc_pages_map.keys())}]
-    else:
-        # Ask LLM to map docs -> patients (small prompt)
-        prompt = build_patient_discovery_prompt(doc_pages_map)
-        try:
-            resp_text = safe_generate(prompt)
-            parsed = parse_json_text(resp_text)
-            patients = parsed.get("patients") if isinstance(parsed, dict) else None
-            if not patients or not isinstance(patients, list):
-                raw_patient_map = [{"patient_label": "PATIENT_1", "docs": list(doc_pages_map.keys())}]
-            else:
-                raw_patient_map = []
-                for p in patients:
-                    label = p.get("patient_label")
-                    docs_list = p.get("docs") or []
-                    # normalize doc paths
-                    docs_norm = []
-                    for d in docs_list:
-                        try:
-                            rp = str(Path(d).resolve())
-                        except Exception:
-                            rp = d
-                        if rp in doc_pages_map:
-                            docs_norm.append(rp)
-                    if docs_norm:
-                        raw_patient_map.append({"patient_label": label, "docs": docs_norm})
-                if not raw_patient_map:
-                    raw_patient_map = [{"patient_label": "PATIENT_1", "docs": list(doc_pages_map.keys())}]
-        except Exception:
-            # fallback to single patient
-            raw_patient_map = [{"patient_label": "PATIENT_1", "docs": list(doc_pages_map.keys())}]
-
-    # Build patient->pages ordered mapping
-    patient_to_pages = {}
-    for entry in raw_patient_map:
-        label = entry["patient_label"]
-        pages_bucket = []
-        for docp in entry["docs"]:
-            pages_bucket.extend(doc_pages_map.get(docp, []))
-        patient_to_pages[label] = pages_bucket
-
-    # Normalize labels to PAT-001...PAT-00N
-    orig_labels = list(patient_to_pages.keys())
-    normalized_map = {lab: f"PAT-{str(i+1).zfill(3)}" for i, lab in enumerate(orig_labels)}
-    patient_pages = {normalized_map[lab]: patient_to_pages[lab] for lab in orig_labels}
-
-    # Per-patient extraction with robust retry & adaptive chunking
-    extracted_by_patient = {}
-    for pat_id, pages in patient_pages.items():
-        # decide chunk size adaptively: start with INITIAL_CHUNK_PAGES
-        chunk_size = INITIAL_CHUNK_PAGES
-        candidates = {}
-
-        def run_extract_pages_with_adaptive(pages_list):
-            nonlocal candidates, chunk_size
-            # create list of page groups to attempt
-            groups = list(chunk_pages_list(pages_list, chunk_size))
-            for grp in groups:
-                # if prompt too large, split the group visually
-                prompt = build_extraction_prompt(grp)
-                # If prompt size huge, reduce group length
-                if len(prompt) > MAX_PROMPT_CHARS:
-                    # shrink chunk_size and retry outer loop by returning False
-                    return False
-                # Try safe_generate; on transient failure, we will adaptively reduce chunk_size and retry from start
-                try:
-                    resp_text = safe_generate(prompt)
-                except Exception as e:
-                    # transient or hard failure for this chunk -> indicate failure to caller for adaptive handling
-                    return False
-                # parse response
-                try:
-                    arr = parse_json_text(resp_text)
-                except Exception:
-                    # parsing failed for this grp -> treat as failure to trigger fallback
-                    return False
-                if not isinstance(arr, list):
-                    # unexpected -> continue but treat as failure to be safe
-                    return False
-                # iterate results
-                for obj in arr:
-                    if not isinstance(obj, dict):
-                        continue
-                    code = obj.get("field_code")
-                    if not code:
-                        continue
-                    raw_conf = obj.get("confidence_score", 0.0)
-                    conf = normalize_confidence(raw_conf)
-                    val_norm = normalize_value(obj.get("value"))
-                    snippet = obj.get("text_snippet") or ""
-                    dname = obj.get("document_name")
-                    dpath = obj.get("document_path")
-                    pno = obj.get("page_number")
-                    if (not dpath or not dname or pno is None) and snippet:
-                        dn, dp, pn = match_snippet_to_pages(snippet, pages)
-                        if dn and dp and pn:
-                            dname = dname or dn
-                            dpath = dpath or dp
-                            pno = pno or pn
-                    cand = {
-                        "value": val_norm,
-                        "confidence_score": conf,
-                        "text_snippet": snippet,
-                        "document_name": dname,
-                        "document_path": dpath,
-                        "page_number": pno
-                    }
-                    existing = candidates.get(code)
-                    if not existing or cand["confidence_score"] > existing["confidence_score"]:
-                        candidates[code] = cand
-            return True
-
-        # Adaptive loop: try running with current chunk_size; on False, halve chunk_size and retry until 1
-        success = False
-        while chunk_size >= 1 and not success:
-            ok = run_extract_pages_with_adaptive(pages)
-            if ok:
-                success = True
-                break
-            else:
-                # reduce chunk size to try more granular calls
-                if chunk_size == 1:
-                    # as final fallback, try per-page single prompts
-                    # attempt each page separately
-                    for single in pages:
-                        try:
-                            prompt = build_extraction_prompt([single])
-                            resp_text = safe_generate(prompt)
-                            arr = parse_json_text(resp_text)
-                        except Exception:
-                            continue
-                        if not isinstance(arr, list):
-                            continue
-                        for obj in arr:
-                            if not isinstance(obj, dict):
-                                continue
-                            code = obj.get("field_code")
-                            if not code:
-                                continue
-                            raw_conf = obj.get("confidence_score", 0.0)
-                            conf = normalize_confidence(raw_conf)
-                            val_norm = normalize_value(obj.get("value"))
-                            snippet = obj.get("text_snippet") or ""
-                            dname = obj.get("document_name") or single.get("document_name")
-                            dpath = obj.get("document_path") or single.get("document_path")
-                            pno = obj.get("page_number") or single.get("page_number")
-                            cand = {
-                                "value": val_norm,
-                                "confidence_score": conf,
-                                "text_snippet": snippet,
-                                "document_name": dname,
-                                "document_path": dpath,
-                                "page_number": pno
-                            }
-                            existing = candidates.get(code)
-                            if not existing or cand["confidence_score"] > existing["confidence_score"]:
-                                candidates[code] = cand
-                    success = True
-                    break
-                else:
-                    chunk_size = max(1, chunk_size // 2)
-                    # reset candidates to avoid mixing partial results from previous attempt
-                    candidates = {}
-                    continue
-
-        extracted_by_patient[pat_id] = candidates
-
-    # Build final output: ensure every template field present for every patient
-    final_output = []
-    for pat_id in sorted(patient_pages.keys()):
-        candidates = extracted_by_patient.get(pat_id, {})
-        for f in FIELDS_SCHEMA:
-            code = f.get("field_code")
-            cand = candidates.get(code)
-            if cand:
-                value = cand.get("value")
-                conf = cand.get("confidence_score", 0.0)
-                snippet = cand.get("text_snippet", "")
-                doc_name = cand.get("document_name")
-                doc_path = cand.get("document_path")
-                page_number = cand.get("page_number")
-            else:
-                value = None
-                conf = 0.0
-                snippet = ""
-                doc_name = None
-                doc_path = None
-                page_number = None
-            final_output.append({
-                "patient_id": pat_id,
-                "group_code": f.get("group_code"),
-                "group_name": f.get("group_name"),
-                "subgroup_code": f.get("subgroup_code"),
-                "subgroup_name": f.get("subgroup_name"),
-                "field_code": code,
-                "field_name": f.get("field_name"),
-                "field_type": f.get("data_type"),
-                "value": value,
-                "confidence_score": conf,
-                "text_snippet": snippet,
-                "document_name": doc_name,
-                "document_path": doc_path,
-                "page_number": page_number
-            })
-
-    # Save output.json
-    output_path = os.path.join(ticket_dir, "output.json")
-    with open(output_path, "w", encoding="utf-8") as outf:
-        json.dump(final_output, outf, indent=2, ensure_ascii=False)
-    print(f"[SUCCESS] Saved extracted data -> {output_path}")
-
-    # Insert into DB: create records per patient and insert fields
-    conn = crud.get_connection()
-    cur = conn.cursor()
-    message_id = crud.get_message_id_for_ticket(ticket_id)
-    tenant_id = crud.get_tenant_for_ticket(ticket_id)
-
-    # create records for each patient label (ordered)
-    patient_to_record = {}
-    ordered_pat_ids = sorted(patient_pages.keys())
-    for pat in ordered_pat_ids:
-        rec = crud.insert_record(cur, tenant_id, ticket_id, message_id, pat)
-        patient_to_record[pat] = rec
-
-    # start field counter
-    field_counter = get_next_field_counter(cur)
-    for row in final_output:
-        pat = row["patient_id"]
-        record_id = patient_to_record.get(pat)
-        db_field = {
-            "group_code": row.get("group_code"),
-            "group_name": row.get("group_name"),
-            "subgroup_code": row.get("subgroup_code"),
-            "subgroup_name": row.get("subgroup_name"),
-            "field_code": row.get("field_code"),
-            "field_name": row.get("field_name"),
-            "field_type": row.get("field_type"),
-            "value": row.get("value"),
-            "confidence_score": row.get("confidence_score"),
-            "document_name": row.get("document_name"),
-            "page_number": row.get("page_number"),
-            "text_snippet": row.get("text_snippet"),
-            "document_path": row.get("document_path")
+        const ticketsRes = await axios.get("http://127.0.0.1:8000/dashboard/recent-tickets");
+        if (ticketsRes.data.recent_tickets?.length > 0) {
+            // Combine and Sort by Date (Descending) to get latest
+            const combined = [...ticketsRes.data.recent_tickets, ...MOCK_TICKETS].sort(
+                (a, b) => new Date(b.created_at) - new Date(a.created_at)
+            );
+            setTickets(combined);
         }
-        crud.insert_field(
-            cur,
-            tenant_id,
-            ticket_id,
-            message_id,
-            pat,
-            record_id,
-            db_field,
-            field_counter
-        )
-        field_counter += 1
+      } catch (err) {
+        console.error("Error fetching dashboard data", err);
+      }
+    };
 
-    conn.commit()
-    cur.close()
-    conn.close()
+    fetchData();
+  }, [role]);
 
-    return output_path, patient_to_record
+  const getStatusClass = (status) => {
+    switch (status.toLowerCase()) {
+      case "new": return "status-new";
+      case "under process":
+      case "under-process": return "status-process";
+      case "closed": return "status-closed";
+      default: return "";
+    }
+  };
+
+  const getFormattedDate = (dateString) => {
+    const date = new Date(dateString);
+    return date.toLocaleString('en-US', {
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true,
+    }).replace(/,/, '');
+  };
+
+  return (
+    <div className="mainpage-wrapper">
+      <div className="cards-container">
+        <div className="dashboard-card card-light">
+          <div className="card-title">New Tickets Today</div>
+          <div className="card-count">{stats.new_tickets_today}</div>
+        </div>
+        <div className="dashboard-card card-light">
+          <div className="card-title">Total Tickets</div>
+          <div className="card-count">{stats.total_tickets}</div>
+        </div>
+        <div className="dashboard-card card-light">
+          <div className="card-title">Pending Records</div>
+          <div className="card-count">{stats.pending_records}</div>
+        </div>
+        <div className="dashboard-card card-light">
+          <div className="card-title">Under Review</div>
+          <div className="card-count">{stats.under_review_records}</div>
+        </div>
+        <div className="dashboard-card card-light">
+          <div className="card-title">Approved Records</div>
+          <div className="card-count">{stats.approved_records}</div>
+        </div>
+        
+        {role === "Admin" && (
+          <>
+            <div
+              className="dashboard-card hoverable card-light admin-client-card"
+              onMouseEnter={() => setHoverClient(clients)}
+              onMouseLeave={() => setHoverClient(null)}
+            >
+              <div className="card-title">Active Sponsors</div>
+              <div className="card-count">{clients.length}</div>
+              {hoverClient && (
+                <div className="hover-details client-hover">
+                  <div className="hover-header">Active Sponsors:</div>
+                  {hoverClient.map((c) => (
+                    <div key={c.client_id} className="hover-item">{c.name} ({c.client_key})</div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div
+              className="dashboard-card hoverable card-light"
+              onMouseEnter={() => setHoverProject(projects)}
+              onMouseLeave={() => setHoverProject(null)}
+            >
+              <div className="card-title">Active Studies</div>
+              <div className="card-count">{projects.length}</div>
+              {hoverProject && (
+                <div className="hover-details project-hover">
+                  <div className="hover-header">Active Studies:</div>
+                  {hoverProject.slice(0, 5).map((p) => (
+                    <div key={p.project_id} className="hover-item">{p.description}</div>
+                  ))}
+                  {hoverProject.length > 5 && <div className="hover-more">...and {hoverProject.length - 5} more</div>}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="dashboard-visuals">
+        <div className="chart-section">
+            <h3 className="section-title">Record Status Distribution</h3>
+            <div className="pie-chart-wrapper" style={{ width: '100%', height: 300 }}>
+                <ResponsiveContainer>
+                    <PieChart>
+                        <Pie
+                            data={chartData}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={60}
+                            outerRadius={80}
+                            paddingAngle={5}
+                            dataKey="value"
+                        >
+                            {chartData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={entry.color} />
+                            ))}
+                        </Pie>
+                        <Tooltip />
+                        <Legend />
+                    </PieChart>
+                </ResponsiveContainer>
+            </div>
+        </div>
+
+        <div className="recent-tickets-table-container">
+          <h3 className="section-title">Recent Tickets</h3>
+          <div className="search-bar-container">
+            <input type="text" placeholder="Search by Ticket ID..." className="search-input" />
+            <button className="search-button">Search</button>
+          </div>
+
+          <table className="tickets-table">
+            <thead>
+              <tr>
+                <th>Ticket ID</th>
+                <th>Study Description</th>
+                <th>Status</th>
+                <th>Inbound Source</th>
+                <th>Assigned User</th>
+                <th>Created At</th>
+              </tr>
+            </thead>
+            <tbody>
+              {/* Only showing the top 5 latest tickets */}
+              {tickets.slice(0, 5).map((t) => (
+                <tr key={t.ticket_id}>
+                  <td className="ticket-id">{t.ticket_id}</td>
+                  <td>{t.project_description}</td>
+                  <td><span className={`status-cell ${getStatusClass(t.status)}`}>{t.status}</span></td>
+                  <td>{t.source}</td>
+                  <td>{t.assigned_user}</td>
+                  <td>{getFormattedDate(t.created_at)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default MainPage;
