@@ -1,102 +1,116 @@
-import os
-import requests
-from mail import graph_client
+      {/* ---------------- VISUALS ---------------- */}
 
-REVIEWER_EMAIL = "anujj1@hexaware.com"
+      <div className="dashboard-visuals">
 
-def send_ticket_notification(ticket_id, subject, sender, receiver, user_id):
+        {/* Status Chart */}
 
-    token = graph_client.get_fresh_token()
+        <div className="chart-section">
+          <h3 className="section-title">Record Status Distribution</h3>
 
-    email_body = f"""
-    <html>
-    <body>
-        <p>Hello,</p>
+          <div style={{ width: "100%", height: 300 }}>
+            <ResponsiveContainer>
+              <PieChart>
 
-        <p>A new ticket has been successfully processed by the system and is now available for review.</p>
+                <Pie
+                  data={chartData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={60}
+                  outerRadius={80}
+                  paddingAngle={5}
+                  dataKey="value"
+                >
+                  {chartData.map((entry, index) => (
+                    <Cell key={index} fill={entry.color} />
+                  ))}
+                </Pie>
 
-        <table border="1" cellpadding="6" cellspacing="0" style="border-collapse: collapse;">
-            <tr>
+                <Tooltip />
+                <Legend />
+
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Emails per Site */}
+
+        <div className="chart-section">
+          <h3 className="section-title">Emails per Site</h3>
+
+          <div style={{ width: "40%", height: 300 }}>
+            <ResponsiveContainer>
+              <BarChart data={emailsPerSite}>
+
+                <CartesianGrid strokeDasharray="3 3" />
+
+                <XAxis dataKey="site" />
+                <YAxis />
+
+                <Tooltip />
+
+                <Bar dataKey="emails" fill="#007bff" />
+
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Recent Tickets */}
+
+        <div className="recent-tickets-table-container">
+
+          <h3 className="section-title">Recent Tickets</h3>
+
+          <table className="tickets-table">
+
+            <thead>
+              <tr>
                 <th>Ticket ID</th>
-                <th>Email Subject</th>
-                <th>Sender</th>
-                <th>Receiver</th>
-                <th>Assigned Reviewer</th>
+                <th>Study Description</th>
+                <th>Site</th>
+                <th>Country</th>
                 <th>Status</th>
-            </tr>
-            <tr>
-                <td>{ticket_id}</td>
-                <td>{subject}</td>
-                <td>{sender}</td>
-                <td>{receiver}</td>
-                <td>{user_id}</td>
-                <td>Closed</td>
-            </tr>
-        </table>
+                <th>Inbound Source</th>
+                <th>Assigned User</th>
+                <th>Created At</th>
+              </tr>
+            </thead>
 
-        <p>Please log into the system and review the extracted records.</p>
+            <tbody>
 
-        <p>Regards<br>
-        PV Automation System</p>
+              {tickets.slice(0, 5).map((t) => (
 
-    </body>
-    </html>
-    """
+                <tr key={t.ticket_id}>
 
-    url = f"https://graph.microsoft.com/v1.0/users/{os.getenv('DELEGATED_USER_EMAIL')}/sendMail"
+                  <td className="ticket-id">{t.ticket_id}</td>
+                  <td>{t.project_description}</td>
+                  <td>{t.site}</td>
+                  <td>{t.country}</td>
 
-    payload = {
-        "message": {
-            "subject": f"Ticket Raised - {ticket_id}",
-            "body": {
-                "contentType": "HTML",
-                "content": email_body
-            },
-            "toRecipients": [
-                {
-                    "emailAddress": {
-                        "address": REVIEWER_EMAIL
-                    }
-                }
-            ]
-        }
-    }
+                  <td>
+                    <span className={`status-cell ${getStatusClass(t.status)}`}>
+                      {t.status}
+                    </span>
+                  </td>
 
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json"
-    }
+                  <td>{t.source}</td>
+                  <td>{t.assigned_user}</td>
+                  <td>{getFormattedDate(t.created_at)}</td>
 
-    requests.post(url, headers=headers, json=payload)
+                </tr>
 
+              ))}
 
+            </tbody>
 
-from win10toast import ToastNotifier
+          </table>
 
-def show_ticket_popup(ticket_id):
+        </div>
 
-    toaster = ToastNotifier()
+      </div>
+    </div>
+  );
+};
 
-    toaster.show_toast(
-        "PV Automation",
-        f"Ticket {ticket_id} successfully raised and processed.",
-        duration=5,
-        threaded=True
-    )
-
-
-
-from notifications.email_notifier import send_ticket_notification
-from notifications.desktop_alert import show_ticket_popup
-
-
-# Send email notification
-send_ticket_notification(ticket_id, subject, sender, receiver, user_id)
-
-# Desktop popup
-show_ticket_popup(ticket_id)
-
-
-
-
-
+export default MainPage;
